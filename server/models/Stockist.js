@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import tenantScope from './plugins/tenantScope.js';
-
+// mirus
 /**
  * Stockist (mobile field-force, Domain 8) — a distributor/stockist tracked
  * by a BDM for secondary-sales visibility. `lastOrderAmount` is paisa

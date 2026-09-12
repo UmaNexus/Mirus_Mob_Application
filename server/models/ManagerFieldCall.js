@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import tenantScope from './plugins/tenantScope.js';
 import { FIELD_TIERS } from '../config/fieldForce.js';
-
+// mirus
 const SampleGivenSchema = new mongoose.Schema({
   product: { type: String, trim: true, required: true },
   quantity: { type: Number, default: 1, min: 0 }

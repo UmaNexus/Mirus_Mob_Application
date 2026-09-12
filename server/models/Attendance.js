@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import tenantScope from './plugins/tenantScope.js';
-
+// mirus and hrms
 /**
  * Attendance (Epic 11) — one row per employee per day. `dateKey` (YYYY-MM-DD)
  * gives a stable unique key regardless of time-of-day. Overtime is a flag +

@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import tenantScope from './plugins/tenantScope.js';
-
+// mirus
 /**
  * Expense (mobile field-force, Domain 5) — a single TA/DA claim line item.
  * `amount` is stored as an integer in paisa (CLAUDE.md financial rule; see

@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import tenantScope from './plugins/tenantScope.js';
-
+// mirus
 /**
  * Doctor (mobile field-force, Domain 2) — a doctor/contact tracked for field
  * visits. `assignedTo` is a single BDM (decision: one primary BDM per doctor;
