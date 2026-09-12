@@ -1,11 +1,11 @@
 import mongoose from 'mongoose';
 import tenantScope from './plugins/tenantScope.js';
+// mirus
 
 const SampleGivenSchema = new mongoose.Schema({
   product: { type: String, trim: true, required: true },
   quantity: { type: Number, default: 1, min: 0 }
 }, { _id: false });
-
 /**
  * DailyCallReport (mobile field-force, Domain 3) — one row per doctor call
  * (individual, joint, or missed). A BDM's DCR "list" for a day is simply
