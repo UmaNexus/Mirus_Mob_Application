@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "MIRUS Field Force",
+    "slug": "mirus-field-force",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.mirus.fieldforce"
+    },
+    "android": {
+      "package": "com.mirus.fieldforce",
+      "adaptiveIcon": {
+        "backgroundColor": "#FFFFFF"
+      }
+    },
+    "extra": {
+      "apiBaseUrl": "http://localhost:5000/api"
+    }
+  }
+}

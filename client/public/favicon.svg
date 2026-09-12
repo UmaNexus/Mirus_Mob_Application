@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="7" fill="#FFFFFF"/>
+  <!-- Stylized M ribbons: grey / orange / grey (logo match) -->
+  <path d="M6 24c2.5-5 5-10 5.5-14 .3 3.5 1.2 8 3.5 14" fill="none" stroke="#707070" stroke-width="3.2" stroke-linecap="round"/>
+  <path d="M12 24c2.5-5 5-10 5.5-14 .3 3.5 1.2 8 3.5 14" fill="none" stroke="#E89000" stroke-width="3.2" stroke-linecap="round"/>
+  <path d="M18 24c2.5-5 5-10 5.5-14 .3 3.5 1.2 8 3.5 14" fill="none" stroke="#707070" stroke-width="3.2" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,42 @@
+{
+  "name": "hrms-server",
+  "version": "1.0.0",
+  "description": "Enterprise MERN HRMS - Express REST API",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js",
+    "test": "node --test --test-concurrency=1 tests/",
+    "db:seed": "node seed/seed.js",
+    "db:seed:admin": "node seed/seedAdmin.js",
+    "db:setup": "node seed/setup.js",
+    "db:migrate:emp-ids-mms": "node scripts/migrate-employee-ids-to-mms.js",
+    "db:seed:mobile-dev": "node scripts/seed-mobile-dev.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "express-validator": "^7.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.6.0",
+    "multer": "^2.0.0",
+    "nodemailer": "^6.9.16",
+    "pdf-lib": "^1.17.1",
+    "sharp": "^0.34.5",
+    "unpdf": "^1.8.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^10.1.2",
+    "nodemon": "^3.1.4",
+    "supertest": "^7.0.0"
+  }
+}

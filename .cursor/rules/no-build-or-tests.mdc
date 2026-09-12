@@ -1,0 +1,11 @@
+---
+description: Do not build or run tests — user handles those
+alwaysApply: true
+---
+
+# No build / test runs
+
+- Do **not** run test suites (`npm test`, `node --test`, etc.).
+- Do **not** build or rebuild Docker images / Compose services, or run production/client builds (`docker compose build`, `docker compose up --build`, `npm run build`, etc.).
+- The user will handle building and testing themselves.
+- You may still edit test files when the task requires it, but do not execute them.

@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-surface text-ink antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  * { -webkit-tap-highlight-color: transparent; }
+
+  /* Custom slim scrollbars */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { @apply bg-slate-300 rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-slate-400; }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold
+           transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-primary-400 focus:ring-offset-2
+           disabled:opacity-50 disabled:cursor-not-allowed select-none;
+  }
+  .btn-primary { @apply btn bg-primary-600 text-white hover:bg-primary-700 active:bg-primary-800 shadow-sm; }
+  .btn-secondary { @apply btn bg-white text-ink border border-line hover:bg-slate-50; }
+  .btn-ghost { @apply btn bg-transparent text-muted hover:bg-slate-100 hover:text-ink; }
+  .btn-danger { @apply btn bg-danger text-white hover:bg-red-700 shadow-sm; }
+  .btn-sm { @apply px-3 py-1.5 text-xs; }
+
+  .input {
+    @apply w-full rounded-lg border border-line bg-white px-3.5 py-2.5 text-sm text-ink placeholder:text-slate-400
+           transition focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100;
+  }
+  .label { @apply mb-1.5 block text-sm font-medium text-slate-700; }
+  .field-error { @apply mt-1 text-xs font-medium text-danger; }
+
+  .card { @apply rounded-xl border border-line bg-card shadow-card; }
+
+  .badge { @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold; }
+  .badge-success { @apply badge bg-success-soft text-success; }
+  .badge-warning { @apply badge bg-warning-soft text-warning; }
+  .badge-danger { @apply badge bg-danger-soft text-danger; }
+  .badge-info { @apply badge bg-info-soft text-info; }
+  .badge-neutral { @apply badge bg-slate-100 text-slate-600; }
+}
+
+/* ---- Plyr (training video player) — Mirus accent ---- */
+.training-plyr {
+  --plyr-color-main: #E89000;
+  --plyr-video-background: #111;
+  --plyr-menu-background: #fff;
+  --plyr-menu-color: #2D2D2D;
+  --plyr-badge-background: #E89000;
+}
+.training-plyr .plyr {
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+.training-plyr .plyr--video {
+  background: #111;
+}
+
+/* ---- AG Grid (Quartz) themed to Mirus orange + grey ---- */
+.ag-theme-quartz {
+  --ag-font-family: 'Inter', system-ui, sans-serif;
+  --ag-font-size: 13px;
+  --ag-foreground-color: #2D2D2D;
+  --ag-background-color: #ffffff;
+  --ag-header-background-color: #FFF8EB;
+  --ag-header-foreground-color: #C27800;
+  --ag-border-color: #E0E0E0;
+  --ag-row-border-color: #F0F0F0;
+  --ag-row-hover-color: #FFF8EB;
+  --ag-selected-row-background-color: #FFEFCC;
+  --ag-accent-color: #E89000;
+  --ag-input-focus-border-color: #E89000;
+  --ag-header-column-resize-handle-color: #B0B0B0;
+  --ag-wrapper-border-radius: 12px;
+  --ag-header-height: 46px;
+  --ag-row-height: 52px;
+}

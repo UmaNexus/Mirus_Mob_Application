@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: hrms-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+      MONGO_INITDB_DATABASE: hrms
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    networks:
+      - hrms-network
+    deploy:
+      resources:
+        limits:
+          memory: 2g # Set this to about half of your total server RAM
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: hrms-server
+    # API is reached via nginx on :80 (/api). Keep 5000 published only for debugging.
+    expose:
+      - "5000"
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      MONGO_URI: mongodb://admin:admin123@mongodb:27017/hrms?authSource=admin
+      JWT_SECRET: ${JWT_SECRET:-your_jwt_secret_key_change_in_production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRE:-7d}
+      # Public SPA URL used in offer / password emails. Point this at the same
+      # domain (and port 80 / https) that maps to the client nginx container —
+      # NOT Vite :5173.
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://hrms-mirus.com}
+      CLIENT_ORIGINS: ${CLIENT_ORIGINS:-http://hrms-mirus.com}
+      COOKIE_NAME: ${COOKIE_NAME:-hrms_token}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@hrms.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin123!}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-noreply@hrms.com}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      # Persist all uploaded files across rebuilds/redeploys (documents, training
+      # videos, company images/avatars, offers, payslips, etc.). Override with an
+      # absolute host path in production, e.g. HRMS_UPLOADS_PATH=/var/lib/hrms/uploads
+      - ${HRMS_UPLOADS_PATH:-./data/uploads}:/app/uploads
+      - ${HRMS_LOGS_PATH:-./data/logs}:/app/logs
+    networks:
+      - hrms-network
+    restart: unless-stopped
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: hrms-client
+    # Publish nginx to the host — `expose` alone is internal-only and
+    # does not make http://localhost:80 reachable from the browser.
+    ports:
+      - "80:80"
+    expose:
+      - "80"
+    depends_on:
+      - server
+    networks:
+      - hrms-network
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:
+  mongodb_config:
+
+networks:
+  hrms-network:
+    driver: bridge

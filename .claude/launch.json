@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mobile-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "mobile", "run", "web"],
+      "port": 8081
+    },
+    {
+      "name": "sandbox-backend",
+      "port": 5000,
+      "url": "http://localhost:5000"
+    }
+  ]
+}
