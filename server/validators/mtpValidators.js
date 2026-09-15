@@ -1,9 +1,21 @@
 import { body } from 'express-validator';
 
-export const upsertMtpRules = [
-  body('month').matches(/^\d{4}-(0[1-9]|1[0-2])$/).withMessage('month must be in YYYY-MM format'),
+const plannedVisitsRules = [
   body('plannedVisits').optional().isArray().withMessage('plannedVisits must be an array'),
-  body('plannedVisits.*.doctorId').optional().isMongoId().withMessage('Invalid doctorId in plannedVisits'),
+  body('plannedVisits.*.doctorId').isMongoId().withMessage('Invalid doctorId in plannedVisits'),
+  body('plannedVisits.*.date').isISO8601().withMessage('Invalid date in plannedVisits')
+];
+
+/** POST /api/mtp — always creates a new tour submission; month is required. */
+export const createMtpRules = [
+  body('month').matches(/^\d{4}-(0[1-9]|1[0-2])$/).withMessage('month must be in YYYY-MM format'),
+  ...plannedVisitsRules,
+  body('remarks').optional().isString().trim()
+];
+
+/** PATCH /api/mtp/:id — edits an existing (still-editable) tour; month is fixed by the record, not sent. */
+export const updateMtpRules = [
+  ...plannedVisitsRules,
   body('remarks').optional().isString().trim()
 ];
 

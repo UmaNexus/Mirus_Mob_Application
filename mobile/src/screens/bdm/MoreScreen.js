@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Receipt, ListChecks, Store, ChartNoAxesCombined, CalendarDays, Bell, LogOut } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { displayName } from '../../navigation/roleHelpers';
 import Card from '../../components/Card';
@@ -8,12 +9,12 @@ import Button from '../../components/Button';
 import { colors, radii, spacing, typography } from '../../theme';
 
 const ITEMS = [
-  { icon: '💰', label: 'Expenses', screen: 'Expenses' },
-  { icon: '📌', label: 'Work Type', screen: 'WorkType' },
-  { icon: '📦', label: 'Stockists', screen: 'Stockists' },
-  { icon: '📈', label: 'Secondary Sales', screen: 'SecondarySales' },
-  { icon: '📆', label: 'Calendar', screen: 'Calendar' },
-  { icon: '🔔', label: 'Alerts', screen: 'Alerts' }
+  { icon: Receipt, label: 'Expenses', screen: 'Expenses' },
+  { icon: ListChecks, label: 'Work Type', screen: 'WorkType' },
+  { icon: Store, label: 'Stockists', screen: 'Stockists' },
+  { icon: ChartNoAxesCombined, label: 'Secondary Sales', screen: 'SecondarySales' },
+  { icon: CalendarDays, label: 'Calendar', screen: 'Calendar' },
+  { icon: Bell, label: 'Alerts', screen: 'Alerts' }
 ];
 
 export default function MoreScreen({ navigation }) {
@@ -27,7 +28,7 @@ export default function MoreScreen({ navigation }) {
       <View style={styles.grid}>
         {ITEMS.map((item) => (
           <Card key={item.screen} style={styles.item} onPress={() => navigation.navigate(item.screen)}>
-            <Text style={styles.itemIcon}>{item.icon}</Text>
+            <item.icon size={24} color={colors.primary} strokeWidth={1.75} />
             <Text style={styles.itemLabel}>{item.label}</Text>
           </Card>
         ))}
@@ -36,7 +37,7 @@ export default function MoreScreen({ navigation }) {
       <Card style={styles.account}>
         <Text style={typography.body}>{displayName(user)}</Text>
         <Text style={typography.subtitle}>BDM · {user?.employeeDetails?.fieldForce?.territory || 'MIRUS'}</Text>
-        <Button title="Sign out" variant="outline" onPress={signOut} style={styles.signOutBtn} />
+        <Button icon={LogOut} title="Sign out" variant="outline" onPress={signOut} style={styles.signOutBtn} />
       </Card>
     </SafeAreaView>
   );
@@ -47,7 +48,6 @@ const styles = StyleSheet.create({
   header: { padding: spacing.lg, paddingBottom: spacing.sm },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingHorizontal: spacing.lg },
   item: { width: '47%', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.lg },
-  itemIcon: { fontSize: 24 },
   itemLabel: { fontSize: 13, fontWeight: '600', color: colors.ink },
   account: { margin: spacing.lg, gap: spacing.xs },
   signOutBtn: { marginTop: spacing.sm }

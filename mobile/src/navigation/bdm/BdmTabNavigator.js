@@ -1,18 +1,18 @@
 import React from 'react';
-import { Text } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { House, ClipboardList, CalendarDays, Stethoscope, MoreHorizontal } from 'lucide-react-native';
 import HomeStack from './HomeStack';
 import DcrStack from './DcrStack';
 import MtpStack from './MtpStack';
 import DoctorsStack from './DoctorsStack';
 import MoreStack from './MoreStack';
-import { colors } from '../../theme';
+import { colors, iconSizes } from '../../theme';
 
 const Tab = createBottomTabNavigator();
 
-const ICONS = { HomeTab: '🏠', DcrTab: '📋', MtpTab: '📅', DoctorsTab: '👨‍⚕️', MoreTab: '⋯' };
+const ICONS = { HomeTab: House, DcrTab: ClipboardList, MtpTab: CalendarDays, DoctorsTab: Stethoscope, MoreTab: MoreHorizontal };
 
-/** BDM's bottom navigation — Home / DCR / MTP / Doctors / More, matching the demo's structure. */
+/** BDM's bottom navigation — Home / DCR / MTP / Doctors / More. */
 export default function BdmTabNavigator() {
   return (
     <Tab.Navigator
@@ -20,7 +20,10 @@ export default function BdmTabNavigator() {
         headerShown: false,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.muted,
-        tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 18 }}>{ICONS[route.name]}</Text>
+        tabBarIcon: ({ color }) => {
+          const Icon = ICONS[route.name];
+          return <Icon size={iconSizes.tabBar} color={color} strokeWidth={2} />;
+        }
       })}
     >
       <Tab.Screen name="HomeTab" component={HomeStack} options={{ title: 'Home' }} />

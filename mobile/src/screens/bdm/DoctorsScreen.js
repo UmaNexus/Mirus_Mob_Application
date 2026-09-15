@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Stethoscope, Phone } from 'lucide-react-native';
 import { useAsync } from '../../hooks/useAsync';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import * as doctorsApi from '../../api/doctors';
@@ -8,7 +9,7 @@ import Card from '../../components/Card';
 import LoadingView from '../../components/LoadingView';
 import ErrorBanner from '../../components/ErrorBanner';
 import EmptyState from '../../components/EmptyState';
-import { colors, spacing, typography } from '../../theme';
+import { colors, spacing, typography, iconSizes } from '../../theme';
 
 /**
  * A BDM's assigned doctors — view-only, per the backend's ownership scope
@@ -35,13 +36,18 @@ export default function DoctorsScreen({ navigation }) {
         keyExtractor={(item) => item._id}
         refreshControl={<RefreshControl refreshing={false} onRefresh={doctors.reload} />}
         ListEmptyComponent={
-          doctors.status === 'success' ? <EmptyState icon="👨‍⚕️" title="No doctors assigned yet" subtitle="Your manager assigns doctors to you." /> : null
+          doctors.status === 'success' ? <EmptyState icon={Stethoscope} title="No doctors assigned yet" subtitle="Your manager assigns doctors to you." /> : null
         }
         renderItem={({ item }) => (
           <Card style={styles.row} onPress={() => navigation.navigate('DoctorDetail', { doctor: item })}>
             <Text style={styles.name}>{item.name}</Text>
             <Text style={styles.meta}>{[item.speciality, item.area].filter(Boolean).join(' · ') || 'No details'}</Text>
-            {item.phone ? <Text style={styles.meta}>📞 {item.phone}</Text> : null}
+            {item.phone ? (
+              <View style={styles.phoneRow}>
+                <Phone size={iconSizes.card} color={colors.muted} />
+                <Text style={styles.meta}>{item.phone}</Text>
+              </View>
+            ) : null}
           </Card>
         )}
       />
@@ -55,5 +61,6 @@ const styles = StyleSheet.create({
   list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg, gap: spacing.sm },
   row: { gap: 2 },
   name: { fontSize: 14, fontWeight: '600', color: colors.ink },
-  meta: { fontSize: 12, color: colors.muted }
+  meta: { fontSize: 12, color: colors.muted },
+  phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }
 });

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ClipboardList, CalendarDays, Receipt, ListChecks } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { useAsync } from '../../hooks/useAsync';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
@@ -86,10 +87,10 @@ export default function BdmHomeScreen({ navigation }) {
 
         <Text style={typography.label}>Quick actions</Text>
         <View style={styles.quickGrid}>
-          <QuickAction icon="📋" label="Log Call" onPress={() => navigation.navigate('DcrTab')} />
-          <QuickAction icon="📅" label="MTP" onPress={() => navigation.navigate('MtpTab')} />
-          <QuickAction icon="💰" label="Expenses" onPress={() => navigation.navigate('MoreTab', { screen: 'Expenses' })} />
-          <QuickAction icon="📌" label="Work Type" onPress={() => navigation.navigate('MoreTab', { screen: 'WorkType' })} />
+          <QuickAction icon={ClipboardList} label="DCR" onPress={() => navigation.navigate('DcrTab')} />
+          <QuickAction icon={CalendarDays} label="MTP" onPress={() => navigation.navigate('MtpTab')} />
+          <QuickAction icon={Receipt} label="Expenses" onPress={() => navigation.navigate('MoreTab', { screen: 'Expenses' })} />
+          <QuickAction icon={ListChecks} label="Work Type" onPress={() => navigation.navigate('MoreTab', { screen: 'WorkType' })} />
         </View>
 
         <Text style={typography.label}>Today</Text>
@@ -103,10 +104,13 @@ export default function BdmHomeScreen({ navigation }) {
               <Stat value={`₹${dashboard.data.todaysExpenseTotal}`} label="Expense today" color={colors.info} />
               <Stat value={dashboard.data.alertsCount} label="Alerts" color={colors.warning} />
             </View>
-            {dashboard.data.mtpStatus && (
+            {dashboard.data.mtpToursThisMonth > 0 && (
               <View style={styles.mtpRow}>
-                <Text style={typography.body}>This month's MTP</Text>
-                <Text style={[styles.mtpBadge, mtpTone(dashboard.data.mtpStatus)]}>{dashboard.data.mtpStatus}</Text>
+                <Text style={typography.body}>Tour plans this month</Text>
+                <Text style={styles.mtpBadge}>
+                  {dashboard.data.mtpToursThisMonth} tour{dashboard.data.mtpToursThisMonth === 1 ? '' : 's'}
+                  {dashboard.data.mtpPendingThisMonth > 0 ? ` · ${dashboard.data.mtpPendingThisMonth} pending` : ''}
+                </Text>
               </View>
             )}
           </Card>
@@ -118,7 +122,7 @@ export default function BdmHomeScreen({ navigation }) {
 
 function QuickAction({ icon, label, onPress }) {
   return (
-    <Button title={`${icon}  ${label}`} variant="outline" onPress={onPress} style={styles.quickItem} />
+    <Button icon={icon} title={label} variant="outline" onPress={onPress} style={styles.quickItem} />
   );
 }
 
@@ -130,10 +134,6 @@ function Stat({ value, label, color = colors.ink }) {
     </View>
   );
 }
-
-const mtpTone = (status) => ({
-  color: status === 'approved' ? colors.success : status === 'rejected' ? colors.danger : colors.warning
-});
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
@@ -152,5 +152,5 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 20, fontWeight: '700' },
   statLabel: { fontSize: 10, color: colors.muted, marginTop: 2 },
   mtpRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.sm, marginTop: spacing.sm },
-  mtpBadge: { fontSize: 12, fontWeight: '700', textTransform: 'capitalize' }
+  mtpBadge: { fontSize: 12, fontWeight: '700', color: colors.ink }
 });

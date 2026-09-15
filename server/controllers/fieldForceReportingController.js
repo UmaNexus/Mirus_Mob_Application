@@ -121,14 +121,18 @@ export const getMyDashboard = asyncHandler(async (req, res) => {
   const today = todayKey();
   const month = currentMonth();
 
-  const [todaysCalls, pendingDcrCount, todaysExpenses, mtp, alertsCount] = await Promise.all([
+  const [todaysCalls, pendingDcrCount, todaysExpenses, mtpsThisMonth, alertsCount] = await Promise.all([
     DailyCallReport.countDocuments({ userId, dateKey: today, type: { $ne: 'missed' } }),
-    DailyCallReport.countDocuments({ userId, submittedAt: null }),
+    // Now that a per-call `status` exists, "pending" means today's calls still
+    // awaiting completion — not merely "not yet submitted" across all history.
+    DailyCallReport.countDocuments({ userId, dateKey: today, status: 'pending' }),
     Expense.aggregate([
       { $match: { userId: new mongoose.Types.ObjectId(userId), date: { $gte: new Date(`${today}T00:00:00.000Z`), $lte: new Date(`${today}T23:59:59.999Z`) } } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]),
-    MonthlyTourPlan.findOne({ userId, month }).select('status'),
+    // A BDM may hold several independent tour plans within one month — the
+    // dashboard reports counts by status, never a single collapsed status.
+    MonthlyTourPlan.find({ userId, month }).select('status'),
     (async () => {
       const doctorCount = await Doctor.countDocuments({
         assignedTo: userId,
@@ -145,7 +149,8 @@ export const getMyDashboard = asyncHandler(async (req, res) => {
       todaysCalls,
       pendingDcrCount,
       todaysExpenseTotal: paisaToRupees(todaysExpenses[0]?.total || 0),
-      mtpStatus: mtp?.status || null,
+      mtpToursThisMonth: mtpsThisMonth.length,
+      mtpPendingThisMonth: mtpsThisMonth.filter((p) => p.status === 'pending').length,
       alertsCount
     }
   });

@@ -61,6 +61,28 @@ test('a BDM sees only doctors assigned to them via /mine', async () => {
   assert.equal(res.body.data[0].name, 'Dr. Mine');
 });
 
+test('plannedVisitsThisMonth sums across ALL of the BDM\'s tour plans for that month, not just one', async () => {
+  const company = await getDefaultCompany();
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-stats@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const bdm = await createUser({
+    companyId: company._id, email: 'bdm-stats@xyz.com', password: 'Password1',
+    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+  });
+  const bdmAgent = request.agent(app);
+  await bdmAgent.post('/api/auth/login').send({ companySlug: company.slug, email: bdm.email, password: 'Password1' });
+
+  const doctor = await asmAgent.post('/api/doctors').send({ name: 'Dr. Stats', assignedTo: String(bdm._id) });
+  const doctorId = doctor.body.doctor._id;
+
+  // Two independent tour plans in the same month, each planning this doctor once.
+  await bdmAgent.post('/api/mtp').send({ month: '2026-11', plannedVisits: [{ doctorId, date: '2026-11-05' }] });
+  await bdmAgent.post('/api/mtp').send({ month: '2026-11', plannedVisits: [{ doctorId, date: '2026-11-12' }] });
+
+  const res = await bdmAgent.get('/api/doctors/mine?month=2026-11');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data[0].plannedVisitsThisMonth, 2, 'should sum visits across both tour plans');
+});
+
 // ---------- ASM+ create / assignment authorization ----------
 
 test('an ASM can create an unassigned doctor', async () => {
@@ -163,6 +185,82 @@ test('CSV import creates authorized rows and reports unauthorized rows as failed
   assert.equal(res.body.imported.length, 1);
   assert.equal(res.body.failed.length, 1);
   assert.equal(res.body.imported[0].name, 'Dr. ImportOk');
+});
+
+// ---------- Import preview/confirm ----------
+
+test('preview reports per-row status without writing anything to the database', async () => {
+  const { agent: asmAgent } = await authAgent(app, { email: 'asm-preview@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+
+  const buffer = await buildRoster([
+    ['', 'Cardiologist', 'Pune', '9999999999', ''], // missing name -> error
+    ['Dr. PreviewNew', 'Neurologist', 'Mumbai', '8888888888', ''] // ok, unassigned
+  ]);
+
+  const res = await asmAgent.post('/api/doctors/import/preview').attach('roster', buffer, 'doctors.xlsx');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.summary.error, 1);
+  assert.equal(res.body.summary.ok, 1);
+  assert.equal(res.body.rows.find((r) => r.name === 'Dr. PreviewNew').status, 'ok');
+
+  const dbCount = await (await import('../models/Doctor.js')).default.countDocuments({});
+  assert.equal(dbCount, 0, 'preview must not create any doctors');
+});
+
+test('preview flags a BDM identifier outside the caller\'s reporting hierarchy', async () => {
+  const company = await getDefaultCompany();
+  const { agent: asmAgent } = await authAgent(app, { email: 'asm-preview3@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const foreignBdm = await createUser({ companyId: company._id, email: 'foreign-preview-bdm@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' }, employeeId: 'PREV-FOREIGN' } });
+
+  const buffer = await buildRoster([['Dr. Blocked', 'Cardiologist', 'Pune', '', 'PREV-FOREIGN']]);
+  const res = await asmAgent.post('/api/doctors/import/preview').attach('roster', buffer, 'doctors.xlsx');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.rows[0].status, 'error');
+  assert.match(res.body.rows[0].message, /reporting hierarchy/);
+});
+
+test('preview flags an existing doctor as a warning (update), not a duplicate create', async () => {
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-preview4@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  await asmAgent.post('/api/doctors').send({ name: 'Dr. Existing' });
+
+  const buffer = await buildRoster([['Dr. Existing', 'Cardiologist', 'Pune', '', '']]);
+  const res = await asmAgent.post('/api/doctors/import/preview').attach('roster', buffer, 'doctors.xlsx');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.rows[0].status, 'warning');
+  assert.match(res.body.rows[0].message, /already exists/);
+});
+
+test('confirm creates ok rows, updates warning rows, and re-validates authorization server-side (never trusting client-supplied resolvedAssignedTo)', async () => {
+  const company = await getDefaultCompany();
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-confirm@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const ownBdm = await createUser({
+    companyId: company._id, email: 'confirm-own-bdm@xyz.com',
+    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id, employeeId: 'CONF-OWN' }
+  });
+  const foreignBdm = await createUser({ companyId: company._id, email: 'confirm-foreign-bdm@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' }, employeeId: 'CONF-FOREIGN' } });
+  const existing = await asmAgent.post('/api/doctors').send({ name: 'Dr. ConfirmUpdate' });
+
+  const res = await asmAgent.post('/api/doctors/import/confirm').send({
+    rows: [
+      { row: 2, name: 'Dr. ConfirmNew', speciality: 'ENT', area: 'Pune', assignIdentifier: 'CONF-OWN' },
+      { row: 3, name: 'Dr. ConfirmUpdate', speciality: 'Updated Spec', assignIdentifier: 'CONF-OWN' },
+      // Client lies about resolvedAssignedTo pointing to a BDM outside the caller's hierarchy — must be rejected server-side.
+      { row: 4, name: 'Dr. ConfirmHijack', assignIdentifier: 'CONF-FOREIGN', resolvedAssignedTo: String(foreignBdm._id) }
+    ]
+  });
+
+  assert.equal(res.status, 201);
+  assert.equal(res.body.created.length, 1);
+  assert.equal(res.body.updated.length, 1);
+  assert.equal(res.body.failed.length, 1);
+  assert.match(res.body.failed[0].error, /reporting hierarchy/);
+
+  const Doctor = (await import('../models/Doctor.js')).default;
+  const updatedDoc = await Doctor.findOne({ name: 'Dr. ConfirmUpdate' });
+  assert.equal(updatedDoc.speciality, 'Updated Spec');
+  assert.equal(String(updatedDoc.assignedTo), String(ownBdm._id));
+  const hijacked = await Doctor.findOne({ name: 'Dr. ConfirmHijack' });
+  assert.equal(hijacked, null, 'the unauthorized row must not have been created');
 });
 
 // ---------- Alerts ----------

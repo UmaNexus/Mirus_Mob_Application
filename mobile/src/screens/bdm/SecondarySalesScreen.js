@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, FlatList, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Plus, X, Package } from 'lucide-react-native';
 import { useAsync } from '../../hooks/useAsync';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import * as salesApi from '../../api/secondarySales';
@@ -75,7 +76,7 @@ export default function SecondarySalesScreen() {
           <Text style={typography.title}>Secondary Sales</Text>
           <Text style={typography.subtitle}>Batch & expiry tracking</Text>
         </View>
-        <Button title={mode ? 'Cancel' : '+ Add'} variant="ghost" onPress={mode ? closeForm : openCreate} />
+        <Button icon={mode ? X : Plus} title={mode ? 'Cancel' : 'Add'} variant="ghost" onPress={mode ? closeForm : openCreate} />
       </View>
 
       {mode && (
@@ -96,7 +97,7 @@ export default function SecondarySalesScreen() {
         contentContainerStyle={styles.list}
         data={sales.data || []}
         keyExtractor={(item) => item._id}
-        ListEmptyComponent={sales.status === 'success' ? <EmptyState icon="📦" title="No batches recorded yet" /> : null}
+        ListEmptyComponent={sales.status === 'success' ? <EmptyState icon={Package} title="No batches recorded yet" /> : null}
         renderItem={({ item }) => {
           const remaining = item.expiryDate ? daysUntil(item.expiryDate) : null;
           const tone = remaining == null ? 'neutral' : remaining < 0 ? 'danger' : remaining <= 30 ? 'warning' : 'success';

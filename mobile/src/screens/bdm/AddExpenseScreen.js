@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ScrollView, StyleSheet, View, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
+import { Paperclip } from 'lucide-react-native';
 import * as expensesApi from '../../api/expenses';
 import FormField from '../../components/FormField';
 import SelectField from '../../components/SelectField';
@@ -68,7 +69,7 @@ export default function AddExpenseScreen({ navigation }) {
 
         <View style={styles.receiptGroup}>
           <Text style={typography.label}>Receipt (optional)</Text>
-          <Button title={receipt ? `📎 ${receipt.name}` : '📎 Attach receipt (photo/PDF)'} variant="outline" onPress={pickReceipt} />
+          <Button icon={Paperclip} title={receipt ? receipt.name : 'Attach receipt (photo/PDF)'} variant="outline" onPress={pickReceipt} />
         </View>
 
         <ErrorBanner message={error} />

@@ -116,10 +116,13 @@ test('an ASM sees their subtree BDM\'s calls via /team but not an unrelated BDM\
 
 // ---------- Submit day ----------
 
-test('submitting a day only marks the caller\'s own entries for that date', async () => {
+test('submitting a day only marks the caller\'s own entries for that date, once no call is still pending', async () => {
   const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
   const created = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-12' });
   assert.equal(created.body.dcr.submittedAt, null);
+  assert.equal(created.body.dcr.status, 'pending');
+
+  await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({ status: 'completed' });
 
   const res = await bdmAgent.patch('/api/dcr/submit-day').send({ date: '2026-08-12' });
   assert.equal(res.status, 200);
@@ -149,4 +152,428 @@ test('an admin in one company never sees DCR entries from another company', asyn
   const res = await adminA.get('/api/dcr/team');
   assert.equal(res.status, 200);
   assert.equal(res.body.data.length, 0);
+});
+
+// ---------- Work Type → DCR: pending lifecycle, area derivation, duplicate protection ----------
+
+test('a call created via the quick-log flow is born pending, with the doctor\'s real area available for display', async () => {
+  const { bdmAgent, asmAgent, bdm } = await setupAsmBdmDoctor();
+  const doctor = await asmAgent.post('/api/doctors').send({ name: 'Dr. Anil Joshi', speciality: 'Neurologist', area: 'Kukatpally', assignedTo: String(bdm._id) });
+
+  const res = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId: doctor.body.doctor._id, productsDetailed: ['Neurogain'] });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.dcr.status, 'pending');
+  assert.equal(res.body.dcr.doctorId.name, 'Dr. Anil Joshi');
+  assert.equal(res.body.dcr.doctorId.area, 'Kukatpally');
+  assert.deepEqual(res.body.dcr.productsDetailed, ['Neurogain']);
+});
+
+test('area is always the doctor\'s own Doctor.area — a client-supplied area field is simply ignored', async () => {
+  const { bdmAgent, asmAgent, bdm } = await setupAsmBdmDoctor();
+  const doctor = await asmAgent.post('/api/doctors').send({ name: 'Dr. Real Area', area: 'Real Area', assignedTo: String(bdm._id) });
+
+  const res = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId: doctor.body.doctor._id, area: 'Fake Injected Area' });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.dcr.doctorId.area, 'Real Area');
+});
+
+test('a cross-tenant doctorId is rejected exactly like an unauthorized one', async () => {
+  const companyB = await createCompany({ slug: 'dcr-cross-tenant' });
+  const { agent: asmBAgent } = await authAgent(app, { company: companyB, email: 'asm-crosstenant@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const doctorB = await asmBAgent.post('/api/doctors').send({ name: 'Dr. OtherTenant' });
+
+  const { bdmAgent } = await setupAsmBdmDoctor();
+  const res = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId: doctorB.body.doctor._id });
+  assert.equal(res.status, 404);
+});
+
+test('double-submitting the exact same call within the duplicate window returns the same DCR, not a second one', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const payload = { type: 'individual', doctorId, productsDetailed: ['Cardivax'] };
+
+  const first = await bdmAgent.post('/api/dcr').send(payload);
+  const second = await bdmAgent.post('/api/dcr').send(payload);
+  assert.equal(first.status, 201);
+  assert.equal(second.status, 201);
+  assert.equal(String(first.body.dcr._id), String(second.body.dcr._id));
+
+  const list = await bdmAgent.get('/api/dcr');
+  assert.equal(list.body.data.length, 1, 'exactly one DCR row must exist, not two');
+});
+
+test('a legitimate second call to the same doctor on a different day is NOT blocked as a duplicate', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const first = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-10' });
+  const second = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-11' });
+  assert.equal(first.status, 201);
+  assert.equal(second.status, 201);
+  assert.notEqual(String(first.body.dcr._id), String(second.body.dcr._id));
+
+  const list = await bdmAgent.get('/api/dcr');
+  assert.equal(list.body.data.length, 2, 'both legitimate calls on different days must exist');
+});
+
+// ---------- DCR completion: PATCH /api/dcr/:id ----------
+
+test('a BDM can complete their own pending DCR with samples, product detail, feedback, and visit time', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const created = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId });
+
+  const res = await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({
+    productsDetailed: ['Neurogain', 'Cardivax'],
+    samplesGiven: [{ product: 'Neurogain', quantity: 5 }, { product: 'Cardivax', quantity: 2 }],
+    feedback: 'Interested in prescribing for new patients.',
+    visitTime: '2026-08-12T11:30:00.000Z',
+    status: 'completed'
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.dcr.status, 'completed');
+  assert.deepEqual(res.body.dcr.productsDetailed, ['Neurogain', 'Cardivax']);
+  assert.equal(res.body.dcr.samplesGiven.length, 2);
+  assert.equal(res.body.dcr.samplesGiven[0].quantity, 5);
+  assert.equal(res.body.dcr.feedback, 'Interested in prescribing for new patients.');
+  assert.equal(new Date(res.body.dcr.visitTime).toISOString(), '2026-08-12T11:30:00.000Z');
+});
+
+test('a pending call can instead be marked missed via PATCH, with no samples/feedback required', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const created = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId });
+
+  const res = await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({ status: 'missed' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.dcr.status, 'missed');
+});
+
+test('a BDM cannot PATCH another BDM\'s DCR', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const created = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId });
+  const { bdmAgent: otherBdmAgent } = await setupAsmBdmDoctor();
+
+  const res = await otherBdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({ status: 'completed' });
+  assert.equal(res.status, 403);
+});
+
+test('a DCR belonging to an already-submitted day cannot be edited', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const created = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-12' });
+  await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({ status: 'completed' });
+  await bdmAgent.patch('/api/dcr/submit-day').send({ date: '2026-08-12' });
+
+  const res = await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({ feedback: 'too late' });
+  assert.equal(res.status, 400);
+});
+
+// ---------- End-of-day submission rules ----------
+
+test('submitting a day with a still-pending call is rejected, and never silently completes or discards it', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-12' });
+
+  const res = await bdmAgent.patch('/api/dcr/submit-day').send({ date: '2026-08-12' });
+  assert.equal(res.status, 400);
+  assert.equal(res.body.details?.pendingCount, 1);
+
+  const list = await bdmAgent.get('/api/dcr?date=2026-08-12');
+  assert.equal(list.body.data[0].status, 'pending', 'the pending call must be untouched, not auto-completed or removed');
+});
+
+test('mark-remaining-missed lets the BDM clear pending calls, then submit succeeds', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-12' });
+
+  const marked = await bdmAgent.patch('/api/dcr/mark-remaining-missed').send({ date: '2026-08-12' });
+  assert.equal(marked.status, 200);
+  assert.equal(marked.body.modifiedCount, 1);
+
+  const submitted = await bdmAgent.patch('/api/dcr/submit-day').send({ date: '2026-08-12' });
+  assert.equal(submitted.status, 200);
+
+  const list = await bdmAgent.get('/api/dcr?date=2026-08-12');
+  assert.equal(list.body.data[0].status, 'missed');
+  assert.ok(list.body.data[0].submittedAt);
+});
+
+// ---------- Category / status filters on GET /api/dcr ----------
+
+test('GET /api/dcr with no filter (category=All) returns every category', async () => {
+  const { bdmAgent, asmAgent, bdm, asm, doctorId } = await setupAsmBdmDoctor();
+  const doctor2 = await asmAgent.post('/api/doctors').send({ name: 'Dr. Two', assignedTo: String(bdm._id) });
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId });
+  await bdmAgent.post('/api/dcr').send({ type: 'joint', doctorId: doctor2.body.doctor._id, accompaniedBy: String(asm._id) });
+  await bdmAgent.post('/api/dcr').send({ type: 'missed', doctorId: doctor2.body.doctor._id });
+
+  const res = await bdmAgent.get('/api/dcr');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 3);
+});
+
+test('type=individual returns only individual calls', async () => {
+  const { bdmAgent, asmAgent, bdm } = await setupAsmBdmDoctor();
+  const d1 = await asmAgent.post('/api/doctors').send({ name: 'Dr. A', assignedTo: String(bdm._id) });
+  const d2 = await asmAgent.post('/api/doctors').send({ name: 'Dr. B', assignedTo: String(bdm._id) });
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId: d1.body.doctor._id });
+  await bdmAgent.post('/api/dcr').send({ type: 'missed', doctorId: d2.body.doctor._id });
+
+  const res = await bdmAgent.get('/api/dcr?type=individual');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 1);
+  assert.equal(res.body.data[0].type, 'individual');
+});
+
+test('type=joint returns only joint calls', async () => {
+  const { bdmAgent, asmAgent, bdm, asm } = await setupAsmBdmDoctor();
+  const d1 = await asmAgent.post('/api/doctors').send({ name: 'Dr. A', assignedTo: String(bdm._id) });
+  const d2 = await asmAgent.post('/api/doctors').send({ name: 'Dr. B', assignedTo: String(bdm._id) });
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId: d1.body.doctor._id });
+  await bdmAgent.post('/api/dcr').send({ type: 'joint', doctorId: d2.body.doctor._id, accompaniedBy: String(asm._id) });
+
+  const res = await bdmAgent.get('/api/dcr?type=joint');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 1);
+  assert.equal(res.body.data[0].type, 'joint');
+});
+
+test('status=pending / completed / missed each return only that status', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const a = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-12' });
+  const b = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-13' });
+  await bdmAgent.patch(`/api/dcr/${a.body.dcr._id}`).send({ status: 'completed' });
+  await bdmAgent.patch(`/api/dcr/${b.body.dcr._id}`).send({ status: 'missed' });
+
+  const pending = await bdmAgent.get('/api/dcr?status=pending');
+  assert.equal(pending.body.data.length, 0);
+  const completed = await bdmAgent.get('/api/dcr?status=completed');
+  assert.equal(completed.body.data.length, 1);
+  assert.equal(completed.body.data[0].status, 'completed');
+  const missed = await bdmAgent.get('/api/dcr?status=missed');
+  assert.equal(missed.body.data.length, 1);
+  assert.equal(missed.body.data[0].status, 'missed');
+});
+
+test('category and status filters combine (e.g. individual + pending)', async () => {
+  const { bdmAgent, asmAgent, bdm, asm, doctorId } = await setupAsmBdmDoctor();
+  const jointDoctor = await asmAgent.post('/api/doctors').send({ name: 'Dr. Joint', assignedTo: String(bdm._id) });
+  const pendingIndividual = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-14' });
+  const completedIndividual = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-15' });
+  await bdmAgent.patch(`/api/dcr/${completedIndividual.body.dcr._id}`).send({ status: 'completed' });
+  await bdmAgent.post('/api/dcr').send({ type: 'joint', doctorId: jointDoctor.body.doctor._id, accompaniedBy: String(asm._id), date: '2026-08-14' });
+
+  const res = await bdmAgent.get('/api/dcr?type=individual&status=pending');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 1);
+  assert.equal(String(res.body.data[0]._id), String(pendingIndividual.body.dcr._id));
+});
+
+// ---------- Mark-remaining-missed safety boundaries ----------
+
+test('mark-remaining-missed leaves completed and already-missed calls untouched', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const pending = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-12' });
+  const completed = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-13' });
+  await bdmAgent.patch(`/api/dcr/${completed.body.dcr._id}`).send({ status: 'completed' });
+  const missed = await bdmAgent.post('/api/dcr').send({ type: 'missed', doctorId, date: '2026-08-14' });
+
+  const res = await bdmAgent.patch('/api/dcr/mark-remaining-missed').send({ date: '2026-08-12' });
+  assert.equal(res.body.modifiedCount, 1);
+
+  const list = await bdmAgent.get('/api/dcr?date=2026-08-12');
+  assert.equal(list.body.data[0].status, 'missed');
+  const completedCheck = await bdmAgent.get('/api/dcr?date=2026-08-13');
+  assert.equal(completedCheck.body.data[0].status, 'completed');
+  const missedCheck = await bdmAgent.get('/api/dcr?date=2026-08-14');
+  assert.equal(missedCheck.body.data[0].status, 'missed');
+  void pending; void missed;
+});
+
+test('mark-remaining-missed never touches another BDM\'s pending calls', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const { bdmAgent: otherBdmAgent, doctorId: otherDoctorId } = await setupAsmBdmDoctor();
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-12' });
+  await otherBdmAgent.post('/api/dcr').send({ type: 'individual', doctorId: otherDoctorId, date: '2026-08-12' });
+
+  await bdmAgent.patch('/api/dcr/mark-remaining-missed').send({ date: '2026-08-12' });
+
+  const otherList = await otherBdmAgent.get('/api/dcr?date=2026-08-12');
+  assert.equal(otherList.body.data[0].status, 'pending', 'another BDM\'s pending call must be untouched');
+});
+
+test('mark-remaining-missed cannot touch a day already submitted (nothing left to mark, no error)', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const created = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-12' });
+  await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({ status: 'completed' });
+  await bdmAgent.patch('/api/dcr/submit-day').send({ date: '2026-08-12' });
+
+  const res = await bdmAgent.patch('/api/dcr/mark-remaining-missed').send({ date: '2026-08-12' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.modifiedCount, 0, 'no pending rows remain, so nothing is modified');
+
+  const list = await bdmAgent.get('/api/dcr?date=2026-08-12');
+  assert.equal(list.body.data[0].status, 'completed', 'the already-completed, submitted row must be untouched');
+});
+
+test('repeating mark-remaining-missed is safe/idempotent', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-12' });
+
+  const first = await bdmAgent.patch('/api/dcr/mark-remaining-missed').send({ date: '2026-08-12' });
+  assert.equal(first.body.modifiedCount, 1);
+  const second = await bdmAgent.patch('/api/dcr/mark-remaining-missed').send({ date: '2026-08-12' });
+  assert.equal(second.body.modifiedCount, 0);
+});
+
+// ---------- Filter state must never affect what gets submitted ----------
+
+test('submit-day submits every unsubmitted entry for the date regardless of any client-side filter', async () => {
+  const { bdmAgent, asmAgent, bdm, asm, doctorId } = await setupAsmBdmDoctor();
+  const jointDoctor = await asmAgent.post('/api/doctors').send({ name: 'Dr. Joint2', assignedTo: String(bdm._id) });
+  const individual = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-12' });
+  const joint = await bdmAgent.post('/api/dcr').send({ type: 'joint', doctorId: jointDoctor.body.doctor._id, accompaniedBy: String(asm._id), date: '2026-08-12' });
+  await bdmAgent.patch(`/api/dcr/${individual.body.dcr._id}`).send({ status: 'completed' });
+  await bdmAgent.patch(`/api/dcr/${joint.body.dcr._id}`).send({ status: 'completed' });
+
+  const res = await bdmAgent.patch('/api/dcr/submit-day').send({ date: '2026-08-12' });
+  assert.equal(res.body.modifiedCount, 2, 'submission is never limited to a subset by category/type');
+});
+
+test('a submitted/locked record cannot be re-modified by mark-remaining-missed or PATCH', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const created = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-12' });
+  await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({ status: 'completed' });
+  await bdmAgent.patch('/api/dcr/submit-day').send({ date: '2026-08-12' });
+
+  const patchRes = await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({ status: 'missed' });
+  assert.equal(patchRes.status, 400);
+});
+
+// ---------- Camp / meeting activities become real DCR rows ----------
+
+test('a camp activity is logged as a DCR row, born pending like other categories, with no doctor', async () => {
+  const { bdmAgent } = await setupAsmBdmDoctor();
+  const res = await bdmAgent.post('/api/dcr').send({ type: 'camp', activityName: 'Diabetes CME camp', venue: 'Community Hall' });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.dcr.type, 'camp');
+  assert.equal(res.body.dcr.status, 'pending');
+  assert.equal(res.body.dcr.doctorId, null);
+  assert.equal(res.body.dcr.activityName, 'Diabetes CME camp');
+});
+
+test('a meeting activity requires activityName', async () => {
+  const { bdmAgent } = await setupAsmBdmDoctor();
+  const res = await bdmAgent.post('/api/dcr').send({ type: 'meeting', venue: 'Office' });
+  assert.equal(res.status, 400);
+});
+
+test('type=camp and type=meeting filters return only that category', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId });
+  await bdmAgent.post('/api/dcr').send({ type: 'camp', activityName: 'Camp A' });
+  await bdmAgent.post('/api/dcr').send({ type: 'meeting', activityName: 'Team sync' });
+
+  const camp = await bdmAgent.get('/api/dcr?type=camp');
+  assert.equal(camp.body.data.length, 1);
+  assert.equal(camp.body.data[0].activityName, 'Camp A');
+
+  const meeting = await bdmAgent.get('/api/dcr?type=meeting');
+  assert.equal(meeting.body.data.length, 1);
+  assert.equal(meeting.body.data[0].activityName, 'Team sync');
+});
+
+// ---------- One Daily DCR per BDM+date: a legitimate new log after submission ----------
+
+test('BDM+date scenario: 3 logs, submit, then a legitimate 4th log after submission joins the SAME day — never a second report', async () => {
+  const { bdmAgent, asmAgent, bdm, asm } = await setupAsmBdmDoctor();
+  const anil = await asmAgent.post('/api/doctors').send({ name: 'Dr. Anil', assignedTo: String(bdm._id) });
+  const rekha = await asmAgent.post('/api/doctors').send({ name: 'Dr. Rekha', assignedTo: String(bdm._id) });
+  const vikram = await asmAgent.post('/api/doctors').send({ name: 'Dr. Vikram', assignedTo: String(bdm._id) });
+  const date = '2026-09-15';
+
+  const call1 = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId: anil.body.doctor._id, date });
+  const call2 = await bdmAgent.post('/api/dcr').send({ type: 'joint', doctorId: rekha.body.doctor._id, accompaniedBy: String(asm._id), date });
+  const call3 = await bdmAgent.post('/api/dcr').send({ type: 'meeting', activityName: 'Team meeting', date });
+  assert.equal(call3.body.dcr.status, 'pending', 'a meeting is born pending, same as any other category');
+  await bdmAgent.patch(`/api/dcr/${call1.body.dcr._id}`).send({ status: 'completed' });
+  await bdmAgent.patch(`/api/dcr/${call2.body.dcr._id}`).send({ status: 'completed' });
+  await bdmAgent.patch(`/api/dcr/${call3.body.dcr._id}`).send({ status: 'completed' });
+
+  // 3 logs exist for the day before first submission.
+  const before = await bdmAgent.get(`/api/dcr?date=${date}`);
+  assert.equal(before.body.data.length, 3);
+
+  const submit1 = await bdmAgent.patch('/api/dcr/submit-day').send({ date });
+  assert.equal(submit1.status, 200);
+  assert.equal(submit1.body.modifiedCount, 3);
+
+  const afterSubmit1 = await bdmAgent.get(`/api/dcr?date=${date}`);
+  assert.ok(afterSubmit1.body.data.every((d) => d.submittedAt), 'every row must be submitted');
+  const oldSubmittedAt = Object.fromEntries(afterSubmit1.body.data.map((d) => [d._id, d.submittedAt]));
+
+  // A legitimate new activity logged AFTER submission must succeed and join the same date.
+  const call4 = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId: vikram.body.doctor._id, date });
+  assert.equal(call4.status, 201, 'logging a new activity after submission must succeed, not be blocked');
+  assert.equal(call4.body.dcr.dateKey, date);
+  assert.equal(call4.body.dcr.status, 'pending');
+
+  // Still exactly 4 rows for this BDM+date — no second "daily report" was created.
+  const afterNewLog = await bdmAgent.get(`/api/dcr?date=${date}`);
+  assert.equal(afterNewLog.body.data.length, 4, 'the new log must join the same daily report, not start a second one');
+
+  // The report now "needs resubmission": a mix of submitted and unsubmitted rows for the same date.
+  const submittedCount = afterNewLog.body.data.filter((d) => d.submittedAt).length;
+  assert.equal(submittedCount, 3, 'the 3 original logs remain submitted');
+  const newRow = afterNewLog.body.data.find((d) => String(d._id) === String(call4.body.dcr._id));
+  assert.equal(newRow.submittedAt, null, 'the new log is not yet submitted — this mix IS "needs resubmission"');
+
+  // Existing logs must be completely unchanged by adding the new one.
+  for (const d of afterNewLog.body.data) {
+    if (d._id !== String(call4.body.dcr._id)) {
+      assert.equal(d.submittedAt, oldSubmittedAt[d._id], 'previously-submitted rows must keep their own submission metadata untouched');
+    }
+  }
+
+  // Resubmission is blocked until the new pending log is handled — never silently dropped or auto-completed.
+  const blockedResubmit = await bdmAgent.patch('/api/dcr/submit-day').send({ date });
+  assert.equal(blockedResubmit.status, 400);
+
+  // Complete the new log, then resubmit — the SAME daily report, not a new one.
+  await bdmAgent.patch(`/api/dcr/${call4.body.dcr._id}`).send({ status: 'completed' });
+  const submit2 = await bdmAgent.patch('/api/dcr/submit-day').send({ date });
+  assert.equal(submit2.status, 200);
+  assert.equal(submit2.body.modifiedCount, 1, 'only the newly-added row needed submitting');
+
+  const final = await bdmAgent.get(`/api/dcr?date=${date}`);
+  assert.equal(final.body.data.length, 4, 'still exactly one logical daily report of 4 rows — never a duplicate');
+  assert.ok(final.body.data.every((d) => d.submittedAt), 'the complete, current list of logs is now submitted');
+
+  // The manager sees the one complete report for this BDM+date, not four unrelated submissions.
+  const teamView = await asmAgent.get(`/api/dcr/team?date=${date}`);
+  assert.equal(teamView.body.data.length, 4);
+});
+
+test('adding a new log after submission never lets it belong to another BDM or tenant', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const { bdmAgent: otherBdmAgent, doctorId: otherDoctorId } = await setupAsmBdmDoctor();
+  const date = '2026-09-16';
+
+  const call = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date });
+  await bdmAgent.patch(`/api/dcr/${call.body.dcr._id}`).send({ status: 'completed' });
+  await bdmAgent.patch('/api/dcr/submit-day').send({ date });
+
+  await otherBdmAgent.post('/api/dcr').send({ type: 'individual', doctorId: otherDoctorId, date });
+
+  const bdmList = await bdmAgent.get(`/api/dcr?date=${date}`);
+  assert.equal(bdmList.body.data.length, 1, 'the other BDM\'s new log must never appear in this BDM\'s daily report');
+});
+
+test('a submitted DCR is visible to the reporting ASM via /team, correctly scoped to that BDM only', async () => {
+  const { bdmAgent, asmAgent, doctorId } = await setupAsmBdmDoctor();
+  const created = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: '2026-08-12' });
+  await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({ status: 'completed' });
+  await bdmAgent.patch('/api/dcr/submit-day').send({ date: '2026-08-12' });
+
+  const res = await asmAgent.get('/api/dcr/team?date=2026-08-12');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 1);
+  assert.equal(res.body.data[0].status, 'completed');
+  assert.ok(res.body.data[0].submittedAt);
 });

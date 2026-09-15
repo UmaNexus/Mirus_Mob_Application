@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, Pressable, Platform, StyleSheet } from 'react-native';
-import { colors, radii, spacing, typography } from '../theme';
+import { CalendarDays } from 'lucide-react-native';
+import { colors, radii, spacing, typography, iconSizes } from '../theme';
 
 // @react-native-community/datetimepicker has no web implementation (same
 // class of gap as expo-secure-store, see tokenStorage.js) — required lazily,
@@ -45,7 +46,7 @@ export default function DateField({ label, value, onChange, placeholder = 'Selec
       {label ? <Text style={typography.label}>{label}</Text> : null}
       <Pressable style={styles.field} onPress={() => setOpen(true)} accessibilityRole="button">
         <Text style={value ? styles.valueText : styles.placeholderText}>{value || placeholder}</Text>
-        <Text style={styles.icon}>📅</Text>
+        <CalendarDays size={iconSizes.card} color={colors.muted} />
       </Pressable>
       {open && (
         <DateTimePicker
@@ -67,6 +68,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md, paddingVertical: spacing.md, backgroundColor: colors.surface, minHeight: 48
   },
   valueText: { fontSize: 14, color: colors.ink },
-  placeholderText: { fontSize: 14, color: colors.muted },
-  icon: { fontSize: 14 }
+  placeholderText: { fontSize: 14, color: colors.muted }
 });

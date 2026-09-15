@@ -1,6 +1,6 @@
 import React from 'react';
-import { Pressable, Text, StyleSheet, ActivityIndicator } from 'react-native';
-import { colors, radii, typography, spacing } from '../theme';
+import { Pressable, Text, View, StyleSheet, ActivityIndicator } from 'react-native';
+import { colors, radii, typography, spacing, iconSizes } from '../theme';
 
 const VARIANTS = {
   primary: { bg: colors.primary, fg: colors.white, border: 'transparent' },
@@ -9,8 +9,13 @@ const VARIANTS = {
   ghost: { bg: 'transparent', fg: colors.primary, border: 'transparent' }
 };
 
-/** Shared button — every screen uses this instead of ad hoc styled Pressables. */
-export default function Button({ title, onPress, variant = 'primary', loading = false, disabled = false, style }) {
+/**
+ * Shared button — every screen uses this instead of ad hoc styled Pressables.
+ * `icon` (optional) is a lucide-react-native component, e.g. `icon={Plus}` —
+ * only pass one when it genuinely helps the action stand out (create/edit/
+ * delete/submit), not on every button.
+ */
+export default function Button({ title, onPress, variant = 'primary', loading = false, disabled = false, icon: Icon, style, accessibilityLabel }) {
   const v = VARIANTS[variant] || VARIANTS.primary;
   const isDisabled = disabled || loading;
 
@@ -19,6 +24,7 @@ export default function Button({ title, onPress, variant = 'primary', loading = 
       onPress={onPress}
       disabled={isDisabled}
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel || title}
       accessibilityState={{ disabled: isDisabled }}
       style={({ pressed }) => [
         styles.base,
@@ -26,7 +32,14 @@ export default function Button({ title, onPress, variant = 'primary', loading = 
         style
       ]}
     >
-      {loading ? <ActivityIndicator color={v.fg} /> : <Text style={[typography.button, { color: v.fg }]}>{title}</Text>}
+      {loading ? (
+        <ActivityIndicator color={v.fg} />
+      ) : (
+        <View style={styles.content}>
+          {Icon ? <Icon size={iconSizes.button} color={v.fg} /> : null}
+          <Text style={[typography.button, { color: v.fg }]}>{title}</Text>
+        </View>
+      )}
     </Pressable>
   );
 }
@@ -39,5 +52,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.lg
-  }
+  },
+  content: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs }
 });

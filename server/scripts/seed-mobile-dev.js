@@ -190,13 +190,18 @@ async function upsertLeaveRequest(companyId, userId, { type, fromDate, toDate, d
 }
 
 async function seedBusinessData({ companyId, bdm, bdm2, asm, rsm }) {
-  // --- Doctors assigned to the primary BDM ---
+  // --- Doctors assigned to the primary BDM, clustered into areas (so the
+  // MTP area-first planning flow has more than one doctor per area to pick
+  // from — additive: existing doctors from earlier seed runs are left as-is,
+  // these are new names only). ---
   const doctorSpecs = [
     { name: 'Dr. Ananya Rao', speciality: 'Cardiology', area: 'Banjara Hills', phone: '9812300001', dob: new Date('1978-04-12'), anniversaryDate: new Date('2005-11-20') },
     { name: 'Dr. Vikram Sethi', speciality: 'Orthopedics', area: 'Jubilee Hills', phone: '9812300002', dob: new Date('1982-09-03') },
     { name: 'Dr. Priya Menon', speciality: 'Pediatrics', area: 'Madhapur', phone: '9812300003', dob: new Date('1985-01-25') },
     { name: 'Dr. Farhan Ahmed', speciality: 'General Medicine', area: 'Kondapur', phone: '9812300004' },
-    { name: 'Dr. Sneha Kulkarni', speciality: 'Dermatology', area: 'Gachibowli', phone: '9812300005' }
+    { name: 'Dr. Sneha Kulkarni', speciality: 'Dermatology', area: 'Gachibowli', phone: '9812300005' },
+    { name: 'Dr. Kiran Shah', speciality: 'Diabetologist', area: 'Banjara Hills', phone: '9812300007' },
+    { name: 'Dr. Neha Patel', speciality: 'Dermatologist', area: 'Jubilee Hills', phone: '9812300008' }
   ];
   const doctors = [];
   for (const spec of doctorSpecs) {

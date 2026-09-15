@@ -45,6 +45,20 @@ export const typography = {
   button: { fontSize: 15, fontWeight: '700' }
 };
 
+/**
+ * One consistent icon-sizing scale (lucide-react-native) so the app never
+ * mixes a 14px icon on one screen with a 28px icon on another. Pick the key
+ * matching the icon's role, not an arbitrary number.
+ */
+export const iconSizes = {
+  tabBar: 22, // bottom navigation
+  header: 20, // header/standalone action icons
+  button: 18, // icon inside a primary/outline button
+  card: 16, // card metadata (doctor phone, area, etc.)
+  action: 16, // small icon-only row actions (edit/remove/reassign)
+  badge: 12 // inside a small status pill
+};
+
 export const shadow = {
   card: {
     shadowColor: '#000',

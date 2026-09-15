@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, FlatList, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Plus, X, Store } from 'lucide-react-native';
 import { useAsync } from '../../hooks/useAsync';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import * as stockistsApi from '../../api/stockists';
@@ -68,7 +69,7 @@ export default function StockistsScreen() {
           <Text style={typography.title}>Stockists</Text>
           <Text style={typography.subtitle}>Secondary sales</Text>
         </View>
-        <Button title={mode ? 'Cancel' : '+ Add'} variant="ghost" onPress={mode ? closeForm : openCreate} />
+        <Button icon={mode ? X : Plus} title={mode ? 'Cancel' : 'Add'} variant="ghost" onPress={mode ? closeForm : openCreate} />
       </View>
 
       {mode && (
@@ -89,7 +90,7 @@ export default function StockistsScreen() {
         contentContainerStyle={styles.list}
         data={stockists.data || []}
         keyExtractor={(item) => item._id}
-        ListEmptyComponent={stockists.status === 'success' ? <EmptyState icon="📦" title="No stockists yet" /> : null}
+        ListEmptyComponent={stockists.status === 'success' ? <EmptyState icon={Store} title="No stockists yet" /> : null}
         renderItem={({ item }) => (
           <Card style={styles.row} onPress={() => openEdit(item)}>
             <View style={styles.rowTop}>

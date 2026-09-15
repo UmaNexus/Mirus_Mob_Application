@@ -1,20 +1,23 @@
 import { Router } from 'express';
 import {
-  listMyMtp, upsertMtp, submitMtp, withdrawMtp, decideMtp, listPendingApprovals, listTeamMtp
+  listMyMtp, createMtp, updateMtp, submitMtp, withdrawMtp, decideMtp, listPendingApprovals, listTeamMtp
 } from '../controllers/mtpController.js';
 import { verifyToken } from '../middleware/authMiddleware.js';
 import { requireFieldCapability } from '../middleware/fieldForceAuth.js';
 import { PERMISSIONS } from '../config/permissions.js';
-import { upsertMtpRules, submitMtpRules, decisionMtpRules } from '../validators/mtpValidators.js';
+import { createMtpRules, updateMtpRules, submitMtpRules, decisionMtpRules } from '../validators/mtpValidators.js';
 import validate from '../middleware/validate.js';
 
 // Mounted at /api/mtp.
 const router = Router();
 router.use(verifyToken);
 
-// BDM self-service.
+// BDM self-service. A BDM may hold several independent tour plans per month
+// (see MonthlyTourPlan model) — POST always starts a new one, PATCH edits a
+// specific still-editable one by id.
 router.get('/', requireFieldCapability(PERMISSIONS.MTP_SUBMIT, 'BDM'), listMyMtp);
-router.post('/', requireFieldCapability(PERMISSIONS.MTP_SUBMIT, 'BDM'), upsertMtpRules, validate, upsertMtp);
+router.post('/', requireFieldCapability(PERMISSIONS.MTP_SUBMIT, 'BDM'), createMtpRules, validate, createMtp);
+router.patch('/:id', requireFieldCapability(PERMISSIONS.MTP_SUBMIT, 'BDM'), updateMtpRules, validate, updateMtp);
 router.patch('/:id/submit', requireFieldCapability(PERMISSIONS.MTP_SUBMIT, 'BDM'), submitMtpRules, validate, submitMtp);
 router.patch('/:id/withdraw', requireFieldCapability(PERMISSIONS.MTP_SUBMIT, 'BDM'), withdrawMtp);
 

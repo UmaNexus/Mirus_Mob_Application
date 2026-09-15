@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, FlatList, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Plus, Receipt } from 'lucide-react-native';
 import { useAsync } from '../../hooks/useAsync';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import * as expensesApi from '../../api/expenses';
@@ -27,7 +28,7 @@ export default function ExpensesScreen({ navigation }) {
           <Text style={typography.title}>Expenses</Text>
           <Text style={typography.subtitle}>TA / DA claims</Text>
         </View>
-        <Button title="+ Add" variant="ghost" onPress={() => navigation.navigate('AddExpense')} />
+        <Button icon={Plus} title="Add" variant="ghost" onPress={() => navigation.navigate('AddExpense')} />
       </View>
 
       {expenses.status === 'loading' && <LoadingView />}
@@ -43,7 +44,7 @@ export default function ExpensesScreen({ navigation }) {
         contentContainerStyle={styles.list}
         data={expenses.data || []}
         keyExtractor={(item) => item._id}
-        ListEmptyComponent={expenses.status === 'success' ? <EmptyState icon="💰" title="No expenses yet" /> : null}
+        ListEmptyComponent={expenses.status === 'success' ? <EmptyState icon={Receipt} title="No expenses yet" /> : null}
         renderItem={({ item }) => (
           <Card style={styles.row}>
             <View style={styles.rowTop}>

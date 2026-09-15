@@ -8,10 +8,15 @@ const PlannedVisitSchema = new mongoose.Schema({
 }, { _id: false });
 
 /**
- * MonthlyTourPlan (mobile field-force, Domain 4) — one document per BDM per
- * calendar month. `approverId` is always server-computed from the submitter's
- * own `employeeDetails.reportingManagerId` at submission time (client
- * decision: strict reporting hierarchy, never a client-chosen approver).
+ * MonthlyTourPlan (mobile field-force, Domain 4) — one document per *tour
+ * submission*. A BDM may have several independent MonthlyTourPlan documents
+ * within the same calendar month (e.g. an early-month tour to one area and a
+ * later, separately-approved tour to another) — `month` is a query/reporting
+ * dimension, not a uniqueness key (see the non-unique index below; it was
+ * unique until the multi-tour-per-month requirement, see git history).
+ * `approverId` is always server-computed from the submitter's own
+ * `employeeDetails.reportingManagerId` at submission time (client decision:
+ * strict reporting hierarchy, never a client-chosen approver).
  */
 const MonthlyTourPlanSchema = new mongoose.Schema({
   companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
@@ -26,7 +31,11 @@ const MonthlyTourPlanSchema = new mongoose.Schema({
   decisionNote: { type: String, trim: true, default: '' }
 }, { timestamps: true });
 
-MonthlyTourPlanSchema.index({ companyId: 1, userId: 1, month: 1 }, { unique: true });
+// Non-unique: a BDM may submit multiple independent tour plans in the same
+// month. Kept as a plain index for the common "my/team plans for this month"
+// queries. The real dev/production database still carries the OLD unique
+// index physically — see scripts/migrate-mtp-allow-multiple-per-month.js.
+MonthlyTourPlanSchema.index({ companyId: 1, userId: 1, month: 1 });
 MonthlyTourPlanSchema.plugin(tenantScope);
 
 export default mongoose.model('MonthlyTourPlan', MonthlyTourPlanSchema);

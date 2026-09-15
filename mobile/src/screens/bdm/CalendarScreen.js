@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { useAsync } from '../../hooks/useAsync';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import * as fieldForceApi from '../../api/fieldForce';
 import Card from '../../components/Card';
 import LoadingView from '../../components/LoadingView';
 import ErrorBanner from '../../components/ErrorBanner';
-import { colors, radii, spacing, typography } from '../../theme';
+import { colors, radii, spacing, typography, iconSizes } from '../../theme';
 
 const monthKey = (d) => d.toISOString().slice(0, 7);
 const daysInMonth = (year, month) => new Date(Date.UTC(year, month, 0)).getUTCDate();
@@ -65,11 +66,11 @@ export default function CalendarScreen() {
         <Text style={typography.title}>Status Calendar</Text>
         <View style={styles.monthNav}>
           <Pressable onPress={() => shiftMonth(-1)} hitSlop={12} accessibilityRole="button" accessibilityLabel="Previous month">
-            <Text style={styles.navArrow}>‹</Text>
+            <ChevronLeft size={iconSizes.header} color={colors.primary} />
           </Pressable>
           <Text style={typography.subtitle}>{month}</Text>
           <Pressable onPress={() => shiftMonth(1)} hitSlop={12} accessibilityRole="button" accessibilityLabel="Next month">
-            <Text style={styles.navArrow}>›</Text>
+            <ChevronRight size={iconSizes.header} color={colors.primary} />
           </Pressable>
         </View>
       </View>
@@ -119,7 +120,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
   header: { padding: spacing.lg, paddingBottom: spacing.sm },
   monthNav: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: 2 },
-  navArrow: { fontSize: 20, color: colors.primary, fontWeight: '700', paddingHorizontal: 4 },
   content: { padding: spacing.lg, gap: spacing.md },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   cell: { width: '13%', aspectRatio: 1, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line },

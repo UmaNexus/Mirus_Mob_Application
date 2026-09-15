@@ -18,3 +18,17 @@ export const displayName = (user) => {
   const last = user?.personalDetails?.lastName || '';
   return `${first} ${last}`.trim() || user?.email || 'User';
 };
+
+/**
+ * True for anyone who can reach the manager-side doctor-assignment / MTP
+ * review screens: admin/superadmin (company-wide field-ops access via their
+ * HRMS role) or a tiered manager (ASM and above). This is a client-side
+ * routing convenience only — every underlying endpoint re-checks the same
+ * authorization server-side (requireFieldCapability / canAccessFieldOpsUser),
+ * so hiding a button here is never the actual security boundary.
+ */
+export const isManagerTier = (user) => {
+  if (!user) return false;
+  if (user.role === 'admin' || user.role === 'superadmin') return true;
+  return ['ASM', 'RSM', 'ZSM', 'NSM'].includes(user.employeeDetails?.fieldForce?.tier);
+};

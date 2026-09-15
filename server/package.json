@@ -12,6 +12,7 @@
     "db:seed:admin": "node seed/seedAdmin.js",
     "db:setup": "node seed/setup.js",
     "db:migrate:emp-ids-mms": "node scripts/migrate-employee-ids-to-mms.js",
+    "db:migrate:mtp-multi": "node scripts/migrate-mtp-allow-multiple-per-month.js",
     "db:seed:mobile-dev": "node scripts/seed-mobile-dev.js"
   },
   "engines": {

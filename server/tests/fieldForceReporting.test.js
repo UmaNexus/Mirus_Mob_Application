@@ -108,7 +108,7 @@ test('the dashboard reflects real submitted data, not fixed numbers', async () =
   const { bdmAgent, asmAgent, bdm } = await setupAsmBdm();
   const zero = await bdmAgent.get('/api/field-force/dashboard');
   assert.equal(zero.body.data.todaysCalls, 0);
-  assert.equal(zero.body.data.mtpStatus, null);
+  assert.equal(zero.body.data.mtpToursThisMonth, 0);
 
   const doctor = await asmAgent.post('/api/doctors').send({ name: 'Dr. Dash', assignedTo: String(bdm._id) });
   await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId: doctor.body.doctor._id });
@@ -123,7 +123,14 @@ test('the dashboard reflects real submitted data, not fixed numbers', async () =
   assert.equal(res.status, 200);
   assert.equal(res.body.data.todaysCalls, 1);
   assert.equal(res.body.data.todaysExpenseTotal, 100);
-  assert.equal(res.body.data.mtpStatus, 'pending');
+  assert.equal(res.body.data.mtpToursThisMonth, 1);
+  assert.equal(res.body.data.mtpPendingThisMonth, 1);
+
+  // A second, independent tour in the same month must be counted too, without collapsing the two statuses.
+  await bdmAgent.post('/api/mtp').send({ month });
+  const withTwoTours = await bdmAgent.get('/api/field-force/dashboard');
+  assert.equal(withTwoTours.body.data.mtpToursThisMonth, 2);
+  assert.equal(withTwoTours.body.data.mtpPendingThisMonth, 1, 'the second tour is still a draft, not pending');
 });
 
 // ---------- Monitor: subtree vs company-wide, tenant isolation ----------
