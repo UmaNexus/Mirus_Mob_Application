@@ -19,6 +19,27 @@ const buildRoster = async (rows) => {
   return wb.xlsx.writeBuffer();
 };
 
+/**
+ * Mirrors the real official MIRUS Doctor List format: a blank first row,
+ * headers on row 2, and the full official column set/order (only
+ * DrName/Location/Employee ID/Speciality-Prac/Mobile No/DOB/DOA map to the
+ * existing Doctor schema — every other column is present, exactly like the
+ * real file, to prove they are safely ignored rather than accidentally
+ * misread as something else).
+ */
+const buildOfficialRoster = async (rows) => {
+  const wb = new ExcelJS.Workbook();
+  const sheet = wb.addWorksheet('Sheet1');
+  sheet.addRow([]);
+  sheet.addRow([
+    'SL No.', 'DrName', 'Location', 'Employee ID', 'BDM Name', 'Manager Location', 'Manager Name',
+    'Station Code', 'HQ/EX/OS', 'Reg No', 'Gender', 'Class', 'Speciality/Prac', 'VF', 'DOB', 'DOA',
+    'Marital Status', 'Address', 'Address Type', 'City', 'State', 'PinCode', 'Email', 'Mobile No'
+  ]);
+  rows.forEach((r) => sheet.addRow(r));
+  return wb.xlsx.writeBuffer();
+};
+
 // ---------- Authentication / tier gating ----------
 
 test('unauthenticated request is rejected', async () => {
@@ -61,7 +82,7 @@ test('a BDM sees only doctors assigned to them via /mine', async () => {
   assert.equal(res.body.data[0].name, 'Dr. Mine');
 });
 
-test('plannedVisitsThisMonth sums across ALL of the BDM\'s tour plans for that month, not just one', async () => {
+test('GET /api/doctors/mine no longer computes plannedVisitsThisMonth — MTP plans an area, never a doctor, so there is nothing per-doctor to sum', async () => {
   const company = await getDefaultCompany();
   const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-stats@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
   const bdm = await createUser({
@@ -70,17 +91,11 @@ test('plannedVisitsThisMonth sums across ALL of the BDM\'s tour plans for that m
   });
   const bdmAgent = request.agent(app);
   await bdmAgent.post('/api/auth/login').send({ companySlug: company.slug, email: bdm.email, password: 'Password1' });
-
-  const doctor = await asmAgent.post('/api/doctors').send({ name: 'Dr. Stats', assignedTo: String(bdm._id) });
-  const doctorId = doctor.body.doctor._id;
-
-  // Two independent tour plans in the same month, each planning this doctor once.
-  await bdmAgent.post('/api/mtp').send({ month: '2026-11', plannedVisits: [{ doctorId, date: '2026-11-05' }] });
-  await bdmAgent.post('/api/mtp').send({ month: '2026-11', plannedVisits: [{ doctorId, date: '2026-11-12' }] });
+  await asmAgent.post('/api/doctors').send({ name: 'Dr. Stats', assignedTo: String(bdm._id) });
 
   const res = await bdmAgent.get('/api/doctors/mine?month=2026-11');
   assert.equal(res.status, 200);
-  assert.equal(res.body.data[0].plannedVisitsThisMonth, 2, 'should sum visits across both tour plans');
+  assert.equal(res.body.data[0].plannedVisitsThisMonth, undefined, 'plannedVisitsThisMonth no longer exists — MTP is area-based, not doctor-based');
 });
 
 // ---------- ASM+ create / assignment authorization ----------
@@ -200,7 +215,7 @@ test('preview reports per-row status without writing anything to the database', 
   const res = await asmAgent.post('/api/doctors/import/preview').attach('roster', buffer, 'doctors.xlsx');
   assert.equal(res.status, 200);
   assert.equal(res.body.summary.error, 1);
-  assert.equal(res.body.summary.ok, 1);
+  assert.equal(res.body.summary.new, 1);
   assert.equal(res.body.rows.find((r) => r.name === 'Dr. PreviewNew').status, 'ok');
 
   const dbCount = await (await import('../models/Doctor.js')).default.countDocuments({});
@@ -219,14 +234,14 @@ test('preview flags a BDM identifier outside the caller\'s reporting hierarchy',
   assert.match(res.body.rows[0].message, /reporting hierarchy/);
 });
 
-test('preview flags an existing doctor as a warning (update), not a duplicate create', async () => {
+test('preview flags an existing doctor as "update", not a duplicate create', async () => {
   const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-preview4@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
   await asmAgent.post('/api/doctors').send({ name: 'Dr. Existing' });
 
   const buffer = await buildRoster([['Dr. Existing', 'Cardiologist', 'Pune', '', '']]);
   const res = await asmAgent.post('/api/doctors/import/preview').attach('roster', buffer, 'doctors.xlsx');
   assert.equal(res.status, 200);
-  assert.equal(res.body.rows[0].status, 'warning');
+  assert.equal(res.body.rows[0].status, 'update');
   assert.match(res.body.rows[0].message, /already exists/);
 });
 
@@ -261,6 +276,153 @@ test('confirm creates ok rows, updates warning rows, and re-validates authorizat
   assert.equal(String(updatedDoc.assignedTo), String(ownBdm._id));
   const hijacked = await Doctor.findOne({ name: 'Dr. ConfirmHijack' });
   assert.equal(hijacked, null, 'the unauthorized row must not have been created');
+});
+
+// ---------- Official MIRUS Doctor List format (DrName/Location/Employee ID/Speciality-Prac/Mobile No/DOB/DOA) ----------
+
+test('the official column headers (row 2, with a blank row 1) are recognized end to end, including DOB/DOA', async () => {
+  const company = await getDefaultCompany();
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-official@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  await createUser({
+    companyId: company._id, email: 'official-bdm@xyz.com',
+    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id, employeeId: 'OFF-001' }
+  });
+
+  const buffer = await buildOfficialRoster([[
+    1, 'Dr. Official', 'Banjara Hills', 'OFF-001', 'Some BDM', 'HQ', 'Some Manager',
+    'STN1', 'HQ', 'REG123', 'Male', 'A', 'Cardiology', '4', '1980-05-10', '2010-02-14',
+    'Married', '123 Street', 'Clinic', 'Hyderabad', 'Telangana', '500034', 'doc@example.com', '9876543210'
+  ]]);
+
+  const preview = await asmAgent.post('/api/doctors/import/preview').attach('roster', buffer, 'doctors.xlsx');
+  assert.equal(preview.status, 200);
+  assert.equal(preview.body.rows.length, 1);
+  const row = preview.body.rows[0];
+  assert.equal(row.name, 'Dr. Official');
+  assert.equal(row.area, 'Banjara Hills');
+  assert.equal(row.speciality, 'Cardiology');
+  assert.equal(row.phone, '9876543210');
+  assert.equal(row.assignIdentifier, 'OFF-001');
+  assert.equal(row.status, 'ok');
+
+  const confirm = await asmAgent.post('/api/doctors/import/confirm').send({ rows: [row] });
+  assert.equal(confirm.status, 201);
+  assert.equal(confirm.body.created.length, 1);
+
+  const Doctor = (await import('../models/Doctor.js')).default;
+  const doc = await Doctor.findOne({ name: 'Dr. Official' });
+  assert.equal(doc.area, 'Banjara Hills');
+  assert.equal(new Date(doc.dob).toISOString().slice(0, 10), '1980-05-10');
+  assert.equal(new Date(doc.anniversaryDate).toISOString().slice(0, 10), '2010-02-14');
+});
+
+// ---------- BDM Employee ID resolution / bulk assignment / invalid BDM ----------
+
+test('an Employee ID that does not belong to any user is reported as an invalid BDM, not silently skipped', async () => {
+  const { agent: asmAgent } = await authAgent(app, { email: 'asm-invalidbdm@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const buffer = await buildRoster([['Dr. NoSuchBdm', 'Cardiologist', 'Pune', '', 'NO-SUCH-ID']]);
+  const res = await asmAgent.post('/api/doctors/import/preview').attach('roster', buffer, 'doctors.xlsx');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.rows[0].status, 'error');
+  assert.match(res.body.rows[0].message, /not found/i);
+});
+
+test('bulk assignment: one upload assigns multiple doctors across multiple BDMs in the caller\'s own hierarchy', async () => {
+  const company = await getDefaultCompany();
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-bulk@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const bdmA = await createUser({ companyId: company._id, email: 'bulk-bdm-a@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id, employeeId: 'BULK-A' } });
+  const bdmB = await createUser({ companyId: company._id, email: 'bulk-bdm-b@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id, employeeId: 'BULK-B' } });
+
+  const buffer = await buildRoster([
+    ['Dr. BulkOne', 'Cardiologist', 'Pune', '', 'BULK-A'],
+    ['Dr. BulkTwo', 'ENT', 'Mumbai', '', 'BULK-B'],
+    ['Dr. BulkThree', 'Dermatology', 'Nagpur', '', 'BULK-A']
+  ]);
+  const preview = await asmAgent.post('/api/doctors/import/preview').attach('roster', buffer, 'doctors.xlsx');
+  assert.ok(preview.body.rows.every((r) => r.status === 'ok'));
+
+  const confirm = await asmAgent.post('/api/doctors/import/confirm').send({ rows: preview.body.rows });
+  assert.equal(confirm.body.created.length, 3);
+
+  const Doctor = (await import('../models/Doctor.js')).default;
+  assert.equal(String((await Doctor.findOne({ name: 'Dr. BulkOne' })).assignedTo), String(bdmA._id));
+  assert.equal(String((await Doctor.findOne({ name: 'Dr. BulkTwo' })).assignedTo), String(bdmB._id));
+  assert.equal(String((await Doctor.findOne({ name: 'Dr. BulkThree' })).assignedTo), String(bdmA._id));
+});
+
+// ---------- Duplicate/conflicting rows within one upload ----------
+
+test('two rows for the same doctor (same name+area) in one file: the second is flagged "duplicate", and confirming both never creates two doctors', async () => {
+  const company = await getDefaultCompany();
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-dup@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const bdm = await createUser({ companyId: company._id, email: 'dup-bdm@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id, employeeId: 'DUP-1' } });
+
+  const buffer = await buildRoster([
+    ['Dr. Duplicate', 'Cardiologist', 'Pune', '', ''],
+    ['Dr. Duplicate', 'Cardiologist', 'Pune', '', 'DUP-1'] // same identity, second row also assigns
+  ]);
+  const preview = await asmAgent.post('/api/doctors/import/preview').attach('roster', buffer, 'doctors.xlsx');
+  assert.equal(preview.body.rows[0].status, 'ok');
+  assert.equal(preview.body.rows[1].status, 'duplicate');
+  assert.match(preview.body.rows[1].message, /row 2/i);
+  assert.equal(preview.body.summary.duplicate, 1);
+
+  const confirm = await asmAgent.post('/api/doctors/import/confirm').send({ rows: preview.body.rows });
+  assert.equal(confirm.status, 201);
+  assert.equal(confirm.body.failed.length, 0);
+
+  const Doctor = (await import('../models/Doctor.js')).default;
+  const matches = await Doctor.find({ name: 'Dr. Duplicate' });
+  assert.equal(matches.length, 1, 'a duplicate row must never create a second doctor');
+  assert.equal(String(matches[0].assignedTo), String(bdm._id), 'the second row\'s assignment must still apply to the same doctor');
+});
+
+// ---------- Re-upload / idempotency ----------
+
+test('re-uploading and re-confirming the exact same file a second time is a no-op create — it only updates the same doctor again', async () => {
+  const company = await getDefaultCompany();
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-idempotent@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  await createUser({ companyId: company._id, email: 'idempotent-bdm@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id, employeeId: 'IDEM-1' } });
+
+  const buffer = await buildRoster([['Dr. Idempotent', 'Cardiologist', 'Pune', '', 'IDEM-1']]);
+
+  const firstPreview = await asmAgent.post('/api/doctors/import/preview').attach('roster', buffer, 'doctors.xlsx');
+  assert.equal(firstPreview.body.rows[0].status, 'ok');
+  const firstConfirm = await asmAgent.post('/api/doctors/import/confirm').send({ rows: firstPreview.body.rows });
+  assert.equal(firstConfirm.body.created.length, 1);
+
+  const secondPreview = await asmAgent.post('/api/doctors/import/preview').attach('roster', buffer, 'doctors.xlsx');
+  assert.equal(secondPreview.body.rows[0].status, 'update', 're-uploading the same file must now match the existing doctor, not offer to create a second one');
+  const secondConfirm = await asmAgent.post('/api/doctors/import/confirm').send({ rows: secondPreview.body.rows });
+  assert.equal(secondConfirm.body.created.length, 0);
+  assert.equal(secondConfirm.body.updated.length, 1);
+
+  const Doctor = (await import('../models/Doctor.js')).default;
+  const matches = await Doctor.find({ name: 'Dr. Idempotent' });
+  assert.equal(matches.length, 1, 're-running the same import must never duplicate the doctor');
+});
+
+// ---------- Tenant isolation ----------
+
+test('a doctor with the same name in another tenant is never matched — import cannot leak across companies', async () => {
+  const companyA = await getDefaultCompany();
+  const companyB = await createCompany({ slug: 'doctor-import-beta' });
+  const { agent: adminBAgent } = await authAgent(app, { company: companyB, email: 'admin-b-import@xyz.com', role: 'admin' });
+  await adminBAgent.post('/api/doctors').send({ name: 'Dr. CrossTenant' });
+
+  const { agent: asmAAgent } = await authAgent(app, { company: companyA, email: 'asm-a-import@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const buffer = await buildRoster([['Dr. CrossTenant', 'Cardiologist', 'Pune', '', '']]);
+  const preview = await asmAAgent.post('/api/doctors/import/preview').attach('roster', buffer, 'doctors.xlsx');
+  assert.equal(preview.body.rows[0].status, 'ok', 'the same-named doctor in another tenant must never be treated as an existing match');
+
+  const confirm = await asmAAgent.post('/api/doctors/import/confirm').send({ rows: preview.body.rows });
+  assert.equal(confirm.body.created.length, 1);
+
+  const Doctor = (await import('../models/Doctor.js')).default;
+  const matches = await Doctor.find({ name: 'Dr. CrossTenant' });
+  assert.equal(matches.length, 2, 'one doctor per tenant — never merged across companies');
+  const companyIds = matches.map((d) => String(d.companyId)).sort();
+  assert.deepEqual(companyIds, [String(companyA._id), String(companyB._id)].sort());
 });
 
 // ---------- Alerts ----------

@@ -2,12 +2,11 @@ import api from './client';
 
 /**
  * A BDM's own assigned doctors — view-only, per the backend's ownership
- * scope. `area` filters to one territory (area-first MTP planning); `month`
- * (YYYY-MM) additionally enriches each doctor with real `lastVisitAt` and
- * `plannedVisitsThisMonth` computed from the backend's own DCR/MTP data.
+ * scope. `area` filters to one territory; each doctor is enriched with real
+ * `lastVisitAt` computed from the backend's own DCR data.
  */
-export const listMine = ({ area, month } = {}) =>
-  api.get('/doctors/mine', { params: { area: area || undefined, month: month || undefined } }).then((res) => res.data.data);
+export const listMine = ({ area } = {}) =>
+  api.get('/doctors/mine', { params: { area: area || undefined } }).then((res) => res.data.data);
 
 export const listAlerts = () => api.get('/doctors/alerts').then((res) => res.data.data);
 

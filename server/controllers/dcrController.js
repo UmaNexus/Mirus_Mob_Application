@@ -7,7 +7,7 @@ import { logActivity } from '../services/activityService.js';
 import {
   hasCompanyWideFieldOpsAccess,
   buildReportingSubtreeIds,
-  buildReportingChainAbove
+  isEligibleJointCallParticipant
 } from '../middleware/fieldForceAuth.js';
 
 const dateKeyOf = (d) => new Date(d).toISOString().slice(0, 10);
@@ -19,24 +19,27 @@ const DOCTOR_SELECT = 'name speciality area';
 const DUPLICATE_WINDOW_MS = 5000;
 
 const DOCTOR_TYPES = new Set(['individual', 'joint']);
-const ACTIVITY_TYPES = new Set(['camp', 'meeting']);
+// Meeting is deliberately NOT a DCR category — it is an internal activity
+// tracked only via Today's Work Type, never a doctor call (see
+// workTypeController.js). Camp remains a legitimate DCR activity type.
+const ACTIVITY_TYPES = new Set(['camp']);
 
 /**
  * POST /api/dcr — a BDM logs one activity for the day (individual call,
- * joint call, camp, meeting, or a directly-logged missed visit). This row
- * simply joins the caller's existing Daily DCR for this date (every row
- * sharing companyId+userId+dateKey) — there is no day-level document to
- * create or duplicate, and no check on whether the day was already
- * submitted: a BDM may always log a legitimate new activity for today, even
- * after submitting. Doing so is what makes that day's report need
- * resubmission (see the module doc on DailyCallReport for why that is
- * derived, not stored).
+ * joint call, camp, or a directly-logged missed visit). This row simply
+ * joins the caller's existing Daily DCR for this date (every row sharing
+ * companyId+userId+dateKey) — there is no day-level document to create or
+ * duplicate, and no check on whether the day was already submitted: a BDM
+ * may always log a legitimate new activity for today, even after
+ * submitting. Doing so is what makes that day's report need resubmission
+ * (see the module doc on DailyCallReport for why that is derived, not
+ * stored).
  *
- * An individual/joint/camp/meeting entry is born `status: 'pending'` — this
- * is the same endpoint Today's Work Type's "Confirm & Log Call" uses, so a
- * quick work-type entry and a DCR-list entry are never two different
- * records for one activity, and every category is completed/marked missed
- * the same consistent way from the DCR detail screen. Only a directly-logged
+ * An individual/joint/camp entry is born `status: 'pending'` — this is the
+ * same endpoint Today's Work Type's "Confirm & Log Call" uses, so a quick
+ * work-type entry and a DCR-list entry are never two different records for
+ * one activity, and every category is completed/marked missed the same
+ * consistent way from the DCR detail screen. Only a directly-logged
  * `missed` call has nothing left to complete, so it alone is born
  * `status: 'missed'`.
  */
@@ -55,9 +58,9 @@ export const createDcr = asyncHandler(async (req, res) => {
     if (!doctor) throw new ApiError(404, 'Doctor not found or not assigned to you');
 
     if (type === 'joint') {
-      const chainAbove = await buildReportingChainAbove(req.user._id);
-      if (!chainAbove.has(String(accompaniedBy))) {
-        throw new ApiError(403, 'accompaniedBy must be a manager in your own reporting chain');
+      const eligible = await isEligibleJointCallParticipant(req.user._id, accompaniedBy);
+      if (!eligible) {
+        throw new ApiError(403, 'accompaniedBy must be an eligible manager above you or a BDM on your own team');
       }
     }
   }
@@ -100,10 +103,18 @@ export const createDcr = asyncHandler(async (req, res) => {
 
 /**
  * PATCH /api/dcr/:id — complete (or edit) the caller's own DCR: samples,
- * product detail, feedback, visit time, and the pending → completed/missed
- * status transition. `doctorId`/`type` are fixed at creation and never
- * editable here (the doctor and call category shown are always read-only in
- * the mobile detail screen). Locked once the day has been submitted.
+ * product detail, feedback, start/end time, and the pending →
+ * completed/missed status transition. `doctorId`/`type` are fixed at
+ * creation and never editable here (the doctor and call category shown are
+ * always read-only in the mobile detail screen). Locked once the day has
+ * been submitted.
+ *
+ * `startTime`/`endTime` replace the single `visitTime` for manual entry —
+ * both are optional (never required for a missed call, and not required at
+ * all otherwise) but when both end up set, `endTime` must be strictly after
+ * `startTime`. Whenever `startTime` changes, the legacy `visitTime` field is
+ * mirrored to it so old records (which only ever had `visitTime`) and new
+ * records both sort/display consistently everywhere else in the app.
  */
 export const updateDcr = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid DCR id');
@@ -112,14 +123,23 @@ export const updateDcr = asyncHandler(async (req, res) => {
   if (String(dcr.userId) !== String(req.user._id)) throw new ApiError(403, 'You can only edit your own DCR');
   if (dcr.submittedAt) throw new ApiError(400, 'This day\'s DCR has already been submitted and cannot be edited');
 
-  const { productsDetailed, samplesGiven, feedback, activityName, venue, visitTime, status } = req.body;
+  const { productsDetailed, samplesGiven, feedback, activityName, venue, visitTime, startTime, endTime, status } = req.body;
   if (productsDetailed !== undefined) dcr.productsDetailed = productsDetailed;
   if (samplesGiven !== undefined) dcr.samplesGiven = samplesGiven;
   if (feedback !== undefined) dcr.feedback = feedback;
   if (activityName !== undefined) dcr.activityName = activityName;
   if (venue !== undefined) dcr.venue = venue;
   if (visitTime !== undefined) dcr.visitTime = new Date(visitTime);
+  if (startTime !== undefined) {
+    dcr.startTime = startTime ? new Date(startTime) : null;
+    if (dcr.startTime) dcr.visitTime = dcr.startTime;
+  }
+  if (endTime !== undefined) dcr.endTime = endTime ? new Date(endTime) : null;
   if (status !== undefined) dcr.status = status;
+
+  if (dcr.startTime && dcr.endTime && dcr.endTime <= dcr.startTime) {
+    throw new ApiError(400, 'endTime must be after startTime');
+  }
 
   await dcr.save();
   await dcr.populate('doctorId', DOCTOR_SELECT);

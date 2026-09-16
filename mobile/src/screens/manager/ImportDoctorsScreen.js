@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
-import { Paperclip, CircleCheck, TriangleAlert, CircleX, Check } from 'lucide-react-native';
+import { Paperclip, CirclePlus, Pencil, ArrowLeftRight, Copy, CircleX, Check } from 'lucide-react-native';
 import * as doctorsApi from '../../api/doctors';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
@@ -10,8 +10,15 @@ import ErrorBanner from '../../components/ErrorBanner';
 import SuccessBanner from '../../components/SuccessBanner';
 import { colors, radii, spacing, typography, iconSizes } from '../../theme';
 
-const STATUS_ICON = { ok: CircleCheck, warning: TriangleAlert, error: CircleX };
-const STATUS_COLOR = { ok: colors.success, warning: colors.warning, error: colors.danger };
+// 'ok' = new doctor, 'update' = existing doctor's details change (assignment
+// untouched), 'reassign' = existing doctor AND the BDM assignment changes,
+// 'duplicate' = same doctor identity (name+area) appears more than once in
+// this same file, 'error' = never imported (missing name, invalid/
+// unauthorized Employee ID, or an existing doctor outside the caller's
+// authorization).
+const STATUS_ICON = { ok: CirclePlus, update: Pencil, reassign: ArrowLeftRight, duplicate: Copy, error: CircleX };
+const STATUS_COLOR = { ok: colors.success, update: colors.info, reassign: colors.warning, duplicate: colors.muted, error: colors.danger };
+const STATUS_LABEL = { ok: 'New', update: 'Update', reassign: 'Reassign', duplicate: 'Duplicate', error: 'Error' };
 
 /**
  * Excel → Upload → Parse → Validate → Preview → Confirm, per the required
@@ -74,7 +81,11 @@ export default function ImportDoctorsScreen({ navigation }) {
       <ScrollView contentContainerStyle={styles.content}>
         <Card style={styles.gap}>
           <Text style={typography.label}>1. Upload roster</Text>
-          <Text style={styles.hint}>Columns: Doctor, Specialization, Area, Phone, Assign to BDM (employee ID or email)</Text>
+          <Text style={styles.hint}>
+            Official MIRUS Doctor List columns (DrName, Location, Speciality/Prac, Mobile No, DOB, DOA, Employee ID)
+            or the simple roster format (Doctor, Specialization, Area, Phone, Assign to BDM) — the BDM's own Employee
+            ID assigns the doctor to them; it is always verified against your reporting hierarchy on the server.
+          </Text>
           <Button icon={Paperclip} title={file ? file.name : 'Choose .xlsx file'} variant="outline" onPress={pickFile} />
           <Button title="Preview" onPress={handlePreview} loading={previewing} disabled={!file} />
         </Card>
@@ -85,8 +96,12 @@ export default function ImportDoctorsScreen({ navigation }) {
           <Card style={styles.gap}>
             <Text style={typography.label}>2. Preview ({preview.summary.total} rows)</Text>
             <View style={styles.summaryRow}>
-              <SummaryChip label="OK" value={preview.summary.ok} color={colors.success} />
-              <SummaryChip label="Warnings" value={preview.summary.warning} color={colors.warning} />
+              <SummaryChip label="New" value={preview.summary.new} color={colors.success} />
+              <SummaryChip label="Update" value={preview.summary.update} color={colors.info} />
+              <SummaryChip label="Reassign" value={preview.summary.reassign} color={colors.warning} />
+            </View>
+            <View style={styles.summaryRow}>
+              <SummaryChip label="Duplicate" value={preview.summary.duplicate} color={colors.muted} />
               <SummaryChip label="Errors" value={preview.summary.error} color={colors.danger} />
             </View>
 
@@ -96,7 +111,7 @@ export default function ImportDoctorsScreen({ navigation }) {
                 <View key={row.row} style={styles.rowItem}>
                   <RowIcon size={iconSizes.card} color={STATUS_COLOR[row.status]} style={styles.rowIcon} />
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.rowTitle}>Row {row.row} — {row.name || '(no name)'}</Text>
+                    <Text style={styles.rowTitle}>Row {row.row} — {row.name || '(no name)'} · {STATUS_LABEL[row.status]}</Text>
                     <Text style={[styles.rowMessage, { color: STATUS_COLOR[row.status] }]}>{row.message}</Text>
                   </View>
                 </View>

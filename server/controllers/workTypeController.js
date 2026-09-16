@@ -3,7 +3,12 @@ import LeaveRequest from '../models/LeaveRequest.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { logActivity } from '../services/activityService.js';
-import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds, buildReportingChainAbove } from '../middleware/fieldForceAuth.js';
+import {
+  hasCompanyWideFieldOpsAccess,
+  buildReportingSubtreeIds,
+  isEligibleJointCallParticipant,
+  isEligibleManagerParticipant
+} from '../middleware/fieldForceAuth.js';
 
 const dateKeyOf = (d) => new Date(d).toISOString().slice(0, 10);
 
@@ -33,9 +38,22 @@ export const upsertWorkType = asyncHandler(async (req, res) => {
   }
 
   if (details.accompaniedBy) {
-    const chainAbove = await buildReportingChainAbove(req.user._id);
-    if (!chainAbove.has(String(details.accompaniedBy))) {
-      throw new ApiError(403, 'accompaniedBy must be a manager in your own reporting chain');
+    const eligible = await isEligibleJointCallParticipant(req.user._id, details.accompaniedBy);
+    if (!eligible) {
+      throw new ApiError(403, 'accompaniedBy must be an eligible manager above you or a BDM on your own team');
+    }
+  }
+
+  // A Meeting is an internal activity: either with an eligible manager
+  // (ASM/RSM/ZSM/NSM — never Admin, never a BDM peer) or with "team"
+  // (Team Meeting — not a real user, so it is stored as the literal string
+  // 'team' inside the existing loosely-typed `details`, not a fake user id).
+  if (type === 'meeting') {
+    const { meetingWith } = details;
+    if (!meetingWith) throw new ApiError(400, 'details.meetingWith is required for a meeting ("team" or an eligible manager id)');
+    if (meetingWith !== 'team') {
+      const eligible = await isEligibleManagerParticipant(req.user._id, meetingWith);
+      if (!eligible) throw new ApiError(403, 'details.meetingWith must be an eligible manager (ASM/RSM/ZSM/NSM) above you, or "team"');
     }
   }
 

@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, SectionList, Alert, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ClipboardList, Send, Undo2, Stethoscope, MapPin, Clock3, RefreshCw, Tent, Handshake } from 'lucide-react-native';
+import { ClipboardList, Send, Undo2, Stethoscope, MapPin, Clock3, RefreshCw, Tent } from 'lucide-react-native';
 import { useAsync } from '../../hooks/useAsync';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import * as dcrApi from '../../api/dcr';
@@ -17,12 +17,14 @@ import { colors, spacing, typography } from '../../theme';
 const todayKey = () => new Date().toISOString().slice(0, 10);
 const TONE_BY_STATUS = { pending: 'warning', completed: 'success', missed: 'danger' };
 
+// Meeting is deliberately NOT a DCR category — it is an internal activity
+// tracked only via Today's Work Type, never a doctor call. Offering it here
+// would only ever show an empty/phantom filter.
 const CATEGORY_FILTERS = [
   { value: 'all', label: 'All' },
   { value: 'individual', label: 'Individual' },
   { value: 'joint', label: 'Joint' },
-  { value: 'camp', label: 'Camp' },
-  { value: 'meeting', label: 'Meeting' }
+  { value: 'camp', label: 'Camp' }
 ];
 const STATUS_FILTERS = [
   { value: 'all', label: 'All' },
@@ -68,7 +70,6 @@ export default function DcrListScreen({ navigation }) {
       { title: 'Individual Calls', data: byType('individual') },
       { title: 'Joint Calls', data: byType('joint') },
       { title: 'Camps', data: byType('camp') },
-      { title: 'Meetings', data: byType('meeting') },
       { title: 'Missed Visits', data: byType('missed') }
     ].filter((s) => s.data.length > 0);
   }, [filtered]);
@@ -183,8 +184,8 @@ export default function DcrListScreen({ navigation }) {
           ) : null
         }
         renderItem={({ item }) => {
-          const isActivity = item.type === 'camp' || item.type === 'meeting';
-          const RowIcon = item.type === 'camp' ? Tent : item.type === 'meeting' ? Handshake : Stethoscope;
+          const isActivity = item.type === 'camp';
+          const RowIcon = item.type === 'camp' ? Tent : Stethoscope;
           return (
             <Card style={styles.row} onPress={() => openCall(item)}>
               <View style={styles.rowTop}>

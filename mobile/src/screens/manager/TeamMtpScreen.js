@@ -6,7 +6,7 @@ import { useAsync } from '../../hooks/useAsync';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import * as mtpApi from '../../api/mtp';
 import { displayName } from '../../navigation/roleHelpers';
-import { monthKey, monthLabel, rangeLabel, blocksFromVisits, areaLookupFromPopulatedVisits } from '../../utils/mtpBlocks';
+import { monthKey, monthLabel, rangeLabel, blocksFromVisits } from '../../utils/mtpBlocks';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
 import StatusBadge from '../../components/StatusBadge';
@@ -37,7 +37,7 @@ export default function TeamMtpScreen({ navigation }) {
     (plans.data || []).forEach((plan) => {
       const bdmId = plan.userId?._id || plan.userId;
       if (!byBdm.has(bdmId)) byBdm.set(bdmId, { title: displayName(plan.userId), data: [] });
-      const blocks = blocksFromVisits(plan.plannedVisits || [], areaLookupFromPopulatedVisits(plan.plannedVisits || []));
+      const blocks = blocksFromVisits(plan.plannedVisits || []);
       const sorted = [...blocks].sort((a, b) => a.startDate.localeCompare(b.startDate));
       const overallRange = sorted.length ? rangeLabel(sorted[0].startDate, sorted[sorted.length - 1].endDate) : null;
       byBdm.get(bdmId).data.push({ plan, areas: [...new Set(blocks.map((b) => b.area))], overallRange });
@@ -74,7 +74,7 @@ export default function TeamMtpScreen({ navigation }) {
             </View>
             <Text style={styles.meta}>{item.areas.join(', ') || 'No area yet'}</Text>
             <View style={styles.rowBottom}>
-              <Text style={styles.visitCount}>{item.plan.plannedVisits?.length || 0} visit{(item.plan.plannedVisits?.length || 0) === 1 ? '' : 's'} planned</Text>
+              <Text style={styles.visitCount}>{item.plan.plannedVisits?.length || 0} tour day{(item.plan.plannedVisits?.length || 0) === 1 ? '' : 's'}</Text>
               <Button title={item.plan.status === 'pending' ? 'Review' : 'View'} variant="ghost" onPress={() => navigation.navigate('MtpReview', { plan: item.plan, bdmName: displayName(item.plan.userId) })} />
             </View>
           </Card>

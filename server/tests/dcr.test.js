@@ -88,6 +88,102 @@ test('a BDM cannot log a joint call claiming an unrelated manager accompanied th
   assert.equal(res.status, 403);
 });
 
+/**
+ * Builds a full 5-tier chain BDM → ASM → RSM → ZSM → NSM → Admin, plus a
+ * same-ASM teammate BDM and an unrelated ASM/BDM pair — for exercising the
+ * complete Joint Call participant eligibility surface (managers up the real
+ * chain, same-team BDMs, and the negative cases: Admin, unrelated manager,
+ * unrelated BDM, cross-tenant).
+ */
+const setupFullChainWithTeam = async () => {
+  setupCounter += 1;
+  const n = setupCounter;
+  const company = await getDefaultCompany();
+  const { agent: adminAgent, user: admin } = await authAgent(app, { company, email: `admin_${n}@xyz.com`, role: 'admin' });
+  const nsm = await createUser({ companyId: company._id, email: `nsm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'NSM' }, reportingManagerId: admin._id } });
+  const zsm = await createUser({ companyId: company._id, email: `zsm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ZSM' }, reportingManagerId: nsm._id } });
+  const rsm = await createUser({ companyId: company._id, email: `rsm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'RSM' }, reportingManagerId: zsm._id } });
+  const asm = await createUser({
+    companyId: company._id, email: `asm_${n}@xyz.com`, password: 'Password1',
+    employeeDetails: { fieldForce: { tier: 'ASM' }, reportingManagerId: rsm._id }
+  });
+  const bdm = await createUser({
+    companyId: company._id, email: `bdm_${n}@xyz.com`, password: 'Password1',
+    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+  });
+  const teammateBdm = await createUser({
+    companyId: company._id, email: `teammate_${n}@xyz.com`, password: 'Password1',
+    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+  });
+  const bdmAgent = await loginAs(company, bdm);
+  const asmAgent = await loginAs(company, asm);
+  const doctorRes = await asmAgent.post('/api/doctors').send({ name: 'Dr. Chain', assignedTo: String(bdm._id) });
+  return { company, admin, adminAgent, nsm, zsm, rsm, asm, asmAgent, bdm, bdmAgent, teammateBdm, doctorId: doctorRes.body.doctor._id };
+};
+
+test('an eligible RSM can be selected as Joint Call companion', async () => {
+  const { bdmAgent, doctorId, rsm } = await setupFullChainWithTeam();
+  const res = await bdmAgent.post('/api/dcr').send({ type: 'joint', doctorId, accompaniedBy: String(rsm._id) });
+  assert.equal(res.status, 201);
+});
+
+test('an eligible ZSM can be selected as Joint Call companion', async () => {
+  const { bdmAgent, doctorId, zsm } = await setupFullChainWithTeam();
+  const res = await bdmAgent.post('/api/dcr').send({ type: 'joint', doctorId, accompaniedBy: String(zsm._id) });
+  assert.equal(res.status, 201);
+});
+
+test('an eligible NSM can be selected as Joint Call companion', async () => {
+  const { bdmAgent, doctorId, nsm } = await setupFullChainWithTeam();
+  const res = await bdmAgent.post('/api/dcr').send({ type: 'joint', doctorId, accompaniedBy: String(nsm._id) });
+  assert.equal(res.status, 201);
+});
+
+test('Admin cannot be selected as a Joint Call manager companion, even though Admin sits above NSM in the raw chain', async () => {
+  const { bdmAgent, doctorId, admin } = await setupFullChainWithTeam();
+  const res = await bdmAgent.post('/api/dcr').send({ type: 'joint', doctorId, accompaniedBy: String(admin._id) });
+  assert.equal(res.status, 403);
+});
+
+test('a same-ASM teammate BDM can be selected as Joint Call companion', async () => {
+  const { bdmAgent, doctorId, teammateBdm } = await setupFullChainWithTeam();
+  const res = await bdmAgent.post('/api/dcr').send({ type: 'joint', doctorId, accompaniedBy: String(teammateBdm._id) });
+  assert.equal(res.status, 201);
+  assert.equal(String(res.body.dcr.accompaniedBy), String(teammateBdm._id));
+});
+
+test('a BDM from an unrelated ASM/team cannot be selected as Joint Call companion', async () => {
+  const { bdmAgent, doctorId } = await setupFullChainWithTeam();
+  const { bdm: unrelatedBdm } = await setupFullChainWithTeam();
+  const res = await bdmAgent.post('/api/dcr').send({ type: 'joint', doctorId, accompaniedBy: String(unrelatedBdm._id) });
+  assert.equal(res.status, 403);
+});
+
+test('a cross-tenant participant is rejected as a Joint Call companion', async () => {
+  const { bdmAgent, doctorId } = await setupFullChainWithTeam();
+  const companyB = await createCompany({ slug: 'dcr-joint-cross-tenant' });
+  const crossTenantAsm = await createUser({ companyId: companyB._id, email: 'cross-tenant-asm-joint@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const res = await bdmAgent.post('/api/dcr').send({ type: 'joint', doctorId, accompaniedBy: String(crossTenantAsm._id) });
+  assert.equal(res.status, 403);
+});
+
+test('a Joint Call creates the correct DCR pending log with the eligible participant stored', async () => {
+  const { bdmAgent, doctorId, asm } = await setupFullChainWithTeam();
+  const res = await bdmAgent.post('/api/dcr').send({ type: 'joint', doctorId, accompaniedBy: String(asm._id) });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.dcr.type, 'joint');
+  assert.equal(res.body.dcr.status, 'pending');
+  assert.equal(String(res.body.dcr.accompaniedBy), String(asm._id));
+});
+
+// ---------- Meeting is deliberately excluded from DCR ----------
+
+test('type "meeting" is rejected by POST /api/dcr — Meeting is an internal Work Type activity only', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const res = await bdmAgent.post('/api/dcr').send({ type: 'meeting', doctorId, activityName: 'Team sync' });
+  assert.equal(res.status, 400);
+});
+
 // ---------- Visibility scoping ----------
 
 test('a BDM sees only their own DCR entries', async () => {
@@ -243,6 +339,87 @@ test('a pending call can instead be marked missed via PATCH, with no samples/fee
   const res = await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({ status: 'missed' });
   assert.equal(res.status, 200);
   assert.equal(res.body.dcr.status, 'missed');
+});
+
+// ---------- Start/End Time (replaces single Visit Time for manual entry) ----------
+
+test('a BDM can set startTime and endTime, and visitTime is mirrored to startTime for backward compatibility', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const created = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId });
+
+  const res = await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({
+    startTime: '2026-08-12T11:00:00.000Z',
+    endTime: '2026-08-12T11:25:00.000Z',
+    status: 'completed'
+  });
+  assert.equal(res.status, 200);
+  assert.equal(new Date(res.body.dcr.startTime).toISOString(), '2026-08-12T11:00:00.000Z');
+  assert.equal(new Date(res.body.dcr.endTime).toISOString(), '2026-08-12T11:25:00.000Z');
+  assert.equal(new Date(res.body.dcr.visitTime).toISOString(), '2026-08-12T11:00:00.000Z', 'visitTime must mirror startTime so old sort/display code keeps working');
+});
+
+test('endTime must be strictly after startTime — equal or earlier is rejected', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const created = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId });
+
+  const equal = await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({
+    startTime: '2026-08-12T11:00:00.000Z', endTime: '2026-08-12T11:00:00.000Z'
+  });
+  assert.equal(equal.status, 400);
+
+  const earlier = await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({
+    startTime: '2026-08-12T11:00:00.000Z', endTime: '2026-08-12T10:30:00.000Z'
+  });
+  assert.equal(earlier.status, 400);
+});
+
+test('endTime is validated against a previously-saved startTime even when only endTime is sent in this PATCH', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const created = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId });
+  await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({ startTime: '2026-08-12T11:00:00.000Z' });
+
+  const res = await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({ endTime: '2026-08-12T10:00:00.000Z' });
+  assert.equal(res.status, 400);
+});
+
+test('startTime/endTime persist and are readable after reload (a fresh GET)', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const created = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId });
+  await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({
+    startTime: '2026-08-12T09:00:00.000Z', endTime: '2026-08-12T09:15:00.000Z'
+  });
+
+  const list = await bdmAgent.get('/api/dcr');
+  const row = list.body.data.find((d) => d._id === created.body.dcr._id);
+  assert.equal(new Date(row.startTime).toISOString(), '2026-08-12T09:00:00.000Z');
+  assert.equal(new Date(row.endTime).toISOString(), '2026-08-12T09:15:00.000Z');
+});
+
+test('marking a call missed does not require startTime/endTime', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const created = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId });
+
+  const res = await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({ status: 'missed' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.dcr.status, 'missed');
+  assert.equal(res.body.dcr.startTime, null);
+  assert.equal(res.body.dcr.endTime, null);
+});
+
+test('an old record with only visitTime (no startTime/endTime) still works — other fields can be edited without supplying either', async () => {
+  const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
+  const created = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId });
+  // Simulates a pre-existing record: startTime/endTime were never set (only
+  // the legacy visitTime, which POST /api/dcr always sets).
+  assert.equal(created.body.dcr.startTime, null);
+  assert.equal(created.body.dcr.endTime, null);
+  assert.ok(created.body.dcr.visitTime);
+
+  const res = await bdmAgent.patch(`/api/dcr/${created.body.dcr._id}`).send({ feedback: 'Editing an old-style record.' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.dcr.feedback, 'Editing an old-style record.');
+  assert.equal(res.body.dcr.startTime, null);
+  assert.equal(res.body.dcr.endTime, null);
 });
 
 test('a BDM cannot PATCH another BDM\'s DCR', async () => {
@@ -446,7 +623,7 @@ test('a submitted/locked record cannot be re-modified by mark-remaining-missed o
   assert.equal(patchRes.status, 400);
 });
 
-// ---------- Camp / meeting activities become real DCR rows ----------
+// ---------- Camp activities become real DCR rows (Meeting deliberately does not) ----------
 
 test('a camp activity is logged as a DCR row, born pending like other categories, with no doctor', async () => {
   const { bdmAgent } = await setupAsmBdmDoctor();
@@ -458,25 +635,14 @@ test('a camp activity is logged as a DCR row, born pending like other categories
   assert.equal(res.body.dcr.activityName, 'Diabetes CME camp');
 });
 
-test('a meeting activity requires activityName', async () => {
-  const { bdmAgent } = await setupAsmBdmDoctor();
-  const res = await bdmAgent.post('/api/dcr').send({ type: 'meeting', venue: 'Office' });
-  assert.equal(res.status, 400);
-});
-
-test('type=camp and type=meeting filters return only that category', async () => {
+test('type=camp filter returns only camp activities', async () => {
   const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
   await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId });
   await bdmAgent.post('/api/dcr').send({ type: 'camp', activityName: 'Camp A' });
-  await bdmAgent.post('/api/dcr').send({ type: 'meeting', activityName: 'Team sync' });
 
   const camp = await bdmAgent.get('/api/dcr?type=camp');
   assert.equal(camp.body.data.length, 1);
   assert.equal(camp.body.data[0].activityName, 'Camp A');
-
-  const meeting = await bdmAgent.get('/api/dcr?type=meeting');
-  assert.equal(meeting.body.data.length, 1);
-  assert.equal(meeting.body.data[0].activityName, 'Team sync');
 });
 
 // ---------- One Daily DCR per BDM+date: a legitimate new log after submission ----------
@@ -490,8 +656,8 @@ test('BDM+date scenario: 3 logs, submit, then a legitimate 4th log after submiss
 
   const call1 = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId: anil.body.doctor._id, date });
   const call2 = await bdmAgent.post('/api/dcr').send({ type: 'joint', doctorId: rekha.body.doctor._id, accompaniedBy: String(asm._id), date });
-  const call3 = await bdmAgent.post('/api/dcr').send({ type: 'meeting', activityName: 'Team meeting', date });
-  assert.equal(call3.body.dcr.status, 'pending', 'a meeting is born pending, same as any other category');
+  const call3 = await bdmAgent.post('/api/dcr').send({ type: 'camp', activityName: 'Team camp', date });
+  assert.equal(call3.body.dcr.status, 'pending', 'a camp is born pending, same as any other category');
   await bdmAgent.patch(`/api/dcr/${call1.body.dcr._id}`).send({ status: 'completed' });
   await bdmAgent.patch(`/api/dcr/${call2.body.dcr._id}`).send({ status: 'completed' });
   await bdmAgent.patch(`/api/dcr/${call3.body.dcr._id}`).send({ status: 'completed' });

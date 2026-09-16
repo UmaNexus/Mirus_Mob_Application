@@ -2,7 +2,8 @@ import mongoose from 'mongoose';
 import tenantScope from './plugins/tenantScope.js';
 // mirus
 const PlannedVisitSchema = new mongoose.Schema({
-  doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', required: true },
+  area: { type: String, trim: true, default: '' },
+  doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', default: null },
   week: { type: Number, min: 1, max: 6, default: null },
   date: { type: Date, default: null }
 }, { _id: false });

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import {
-  listMyMtp, createMtp, updateMtp, submitMtp, withdrawMtp, decideMtp, listPendingApprovals, listTeamMtp
+  listMyMtp, createMtp, updateMtp, submitMtp, withdrawMtp, decideMtp, listPendingApprovals, listTeamMtp, listEligibleApprovers
 } from '../controllers/mtpController.js';
 import { verifyToken } from '../middleware/authMiddleware.js';
 import { requireFieldCapability } from '../middleware/fieldForceAuth.js';
@@ -16,6 +16,7 @@ router.use(verifyToken);
 // (see MonthlyTourPlan model) — POST always starts a new one, PATCH edits a
 // specific still-editable one by id.
 router.get('/', requireFieldCapability(PERMISSIONS.MTP_SUBMIT, 'BDM'), listMyMtp);
+router.get('/approvers', requireFieldCapability(PERMISSIONS.MTP_SUBMIT, 'BDM'), listEligibleApprovers);
 router.post('/', requireFieldCapability(PERMISSIONS.MTP_SUBMIT, 'BDM'), createMtpRules, validate, createMtp);
 router.patch('/:id', requireFieldCapability(PERMISSIONS.MTP_SUBMIT, 'BDM'), updateMtpRules, validate, updateMtp);
 router.patch('/:id/submit', requireFieldCapability(PERMISSIONS.MTP_SUBMIT, 'BDM'), submitMtpRules, validate, submitMtp);

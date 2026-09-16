@@ -18,9 +18,12 @@ const WorkTypeSchema = new mongoose.Schema({
     required: true
   },
   // Loosely-typed, per-type descriptive fields (doctorId/product/area for
-  // individual+joint; campName/venue for camp; agenda/location for meeting;
-  // accompaniedBy for joint/jointcall — validated against the reporting
-  // chain, same as DCR joint calls). Never the source of truth for leave.
+  // individual+joint; campName/venue for camp; agenda/venue + meetingWith
+  // for meeting — meetingWith is either the literal string 'team' (Team
+  // Meeting) or an eligible manager's user id (Manager Meeting), never a
+  // fake user; accompaniedBy for joint/jointcall — validated against the
+  // caller's real eligible participants, same as DCR joint calls). Never
+  // the source of truth for leave.
   details: { type: mongoose.Schema.Types.Mixed, default: {} },
   linkedLeaveRequestId: { type: mongoose.Schema.Types.ObjectId, ref: 'LeaveRequest', default: null }
 }, { timestamps: true });

@@ -5,40 +5,81 @@ import User from '../models/User.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { logActivity } from '../services/activityService.js';
-import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds } from '../middleware/fieldForceAuth.js';
+import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds, buildReportingChainAbove } from '../middleware/fieldForceAuth.js';
 
 const EDITABLE_STATUSES = ['draft', 'rejected', 'withdrawn'];
-const VISIT_POPULATE = { path: 'plannedVisits.doctorId', select: 'name speciality area' };
+const APPROVER_SELECT = 'personalDetails.firstName personalDetails.lastName role employeeDetails.fieldForce';
+const POPULATE = [
+  { path: 'plannedVisits.doctorId', select: 'name speciality area' },
+  { path: 'approverId', select: APPROVER_SELECT }
+];
+
+// Eligible approver tiers, per the fixed hierarchy (never RBM/ZBM). Admin/
+// superadmin qualify separately via their existing company-wide access.
+const APPROVER_TIERS = ['ASM', 'RSM', 'ZSM', 'NSM'];
 
 /**
- * Validate a `plannedVisits` array before it is persisted. The mobile client
- * cannot be trusted to only ever send the submitter's own assigned doctors or
- * dates inside the target month — both are re-checked here against the
- * database on every write, never assumed from the request body.
+ * The caller's own real eligible approvers:
+ *  - every ASM+ tier manager in their own reporting chain
+ *    (`buildReportingChainAbove` — a straight walk up `reportingManagerId`,
+ *    so it can never include a peer/unrelated user or cross-tenant record), and
+ *  - every admin/superadmin in the same tenant — company-wide access holders
+ *    are eligible regardless of the literal reporting chain, mirroring the
+ *    exact same bypass `decideMtp` already grants them (an admin isn't
+ *    necessarily anyone's line manager in `reportingManagerId`, but already
+ *    has blanket authority to decide any pending MTP).
+ *
+ * This is the single source of truth for both the "Select Approver" list
+ * and the server-side check on submit — the client can never expand it by
+ * sending an arbitrary id.
+ */
+const resolveEligibleApprovers = async (userId) => {
+  const chainIds = [...(await buildReportingChainAbove(userId))];
+  const [chainUsers, admins] = await Promise.all([
+    chainIds.length ? User.find({ _id: { $in: chainIds } }).select(APPROVER_SELECT) : [],
+    User.find({ role: { $in: ['admin', 'superadmin'] } }).select(APPROVER_SELECT)
+  ]);
+  const tieredApprovers = chainUsers.filter((u) => APPROVER_TIERS.includes(u.employeeDetails?.fieldForce?.tier));
+  return [...tieredApprovers, ...admins];
+};
+
+/**
+ * Validate a `plannedVisits` array before it is persisted. Each entry is a
+ * date + Area/Location (never a doctor — see the model doc). The mobile
+ * client cannot be trusted to only ever send an area the submitter is
+ * actually authorized to plan, or dates inside the target month, or a
+ * date-range that doesn't collide with another one already in this same
+ * plan — all three are re-checked here against the database on every write.
+ *
+ * "Authorized area" reuses the existing Doctor.area / assignment data (the
+ * BDM's own assigned doctors' areas) rather than a separate Area model, per
+ * the existing territory convention — there is no dedicated Area collection
+ * to check against.
  */
 const assertPlannedVisitsValid = async (userId, month, plannedVisits) => {
   if (!plannedVisits || !plannedVisits.length) return;
 
-  const doctorIds = [...new Set(plannedVisits.map((v) => String(v.doctorId)))];
-  const owned = await Doctor.find({ _id: { $in: doctorIds }, assignedTo: userId }).select('_id');
-  const ownedSet = new Set(owned.map((d) => String(d._id)));
+  const authorizedAreas = new Set((await Doctor.distinct('area', { assignedTo: userId })).filter(Boolean));
 
-  const seen = new Set();
+  const seenDates = new Set();
   for (const visit of plannedVisits) {
-    if (!visit.doctorId || !mongoose.isValidObjectId(visit.doctorId)) {
-      throw new ApiError(400, 'Each planned visit needs a valid doctorId');
-    }
-    if (!ownedSet.has(String(visit.doctorId))) {
-      throw new ApiError(403, 'You can only plan visits to doctors assigned to you');
+    if (!visit.area) throw new ApiError(400, 'Each planned visit needs an area');
+    if (!authorizedAreas.has(visit.area)) {
+      throw new ApiError(403, `You are not authorized to plan the area "${visit.area}"`);
     }
     if (!visit.date) throw new ApiError(400, 'Each planned visit needs a date');
     const visitMonth = new Date(visit.date).toISOString().slice(0, 7);
     if (visitMonth !== month) {
       throw new ApiError(400, `Planned visit date must fall within ${month}`);
     }
-    const key = `${visit.doctorId}_${new Date(visit.date).toISOString().slice(0, 10)}`;
-    if (seen.has(key)) throw new ApiError(400, 'Duplicate planned visit: same doctor and date appear twice');
-    seen.add(key);
+    // Flattened date ranges naturally expose an overlap as the same date
+    // appearing twice — regardless of area, one date can only ever belong
+    // to one range in a single tour plan.
+    const dateKey = new Date(visit.date).toISOString().slice(0, 10);
+    if (seenDates.has(dateKey)) {
+      throw new ApiError(400, `${dateKey} is already assigned to another date range in this tour plan — date ranges cannot overlap`);
+    }
+    seenDates.add(dateKey);
   }
 };
 
@@ -51,7 +92,7 @@ const assertPlannedVisitsValid = async (userId, month, plannedVisits) => {
 export const listMyMtp = asyncHandler(async (req, res) => {
   const filter = { userId: req.user._id };
   if (req.query.month) filter.month = String(req.query.month);
-  const plans = await MonthlyTourPlan.find(filter).sort({ createdAt: -1 }).populate(VISIT_POPULATE);
+  const plans = await MonthlyTourPlan.find(filter).sort({ createdAt: -1 }).populate(POPULATE);
   res.status(200).json({ success: true, data: plans });
 });
 
@@ -68,7 +109,7 @@ export const createMtp = asyncHandler(async (req, res) => {
   if (plannedVisits !== undefined) await assertPlannedVisitsValid(req.user._id, month, plannedVisits);
 
   const plan = await MonthlyTourPlan.create({ userId: req.user._id, month, plannedVisits: plannedVisits || [], remarks: remarks || '' });
-  await plan.populate(VISIT_POPULATE);
+  await plan.populate(POPULATE);
   await logActivity({ actor: req.user, action: 'mtp.create', entityType: 'MonthlyTourPlan', entityId: plan._id, message: `Tour plan created for ${month}` });
   res.status(201).json({ success: true, message: 'Tour plan created', mtp: plan });
 });
@@ -100,14 +141,31 @@ export const updateMtp = asyncHandler(async (req, res) => {
   plan.decidedAt = null;
   plan.decisionNote = '';
   await plan.save();
-  await plan.populate(VISIT_POPULATE);
+  await plan.populate(POPULATE);
   res.status(200).json({ success: true, message: 'Tour plan updated', mtp: plan });
 });
 
 /**
- * PATCH /api/mtp/:id/submit — submit for approval. `approverId` is always
- * computed server-side from the submitter's own reporting manager — the
- * mobile client cannot choose an approver (client decision: strict hierarchy).
+ * GET /api/mtp/approvers — the caller's own eligible approvers, for the
+ * "Select Approver" picker. See `resolveEligibleApprovers` — a real,
+ * server-computed subset of the caller's own reporting chain; the client
+ * only ever gets to choose among what this endpoint actually returns, and
+ * `submitMtp` independently re-derives the same set rather than trusting
+ * whatever the client remembered from this call.
+ */
+export const listEligibleApprovers = asyncHandler(async (req, res) => {
+  const approvers = await resolveEligibleApprovers(req.user._id);
+  res.status(200).json({ success: true, data: approvers });
+});
+
+/**
+ * PATCH /api/mtp/:id/submit — submit for approval to an explicitly BDM-
+ * selected approver. The client sends `approverId`, but it is never trusted
+ * blindly: it must be one of `resolveEligibleApprovers(req.user._id)` — a
+ * real manager in the caller's own reporting chain, ASM+ tier or
+ * company-wide access — or the submission is rejected. There is no
+ * fallback to "the immediate reporting manager"; an approver must always be
+ * explicitly chosen.
  */
 export const submitMtp = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid MTP id');
@@ -118,18 +176,24 @@ export const submitMtp = asyncHandler(async (req, res) => {
     throw new ApiError(400, `MTP is already ${plan.status}`);
   }
 
-  const submitter = await User.findById(req.user._id).select('employeeDetails.reportingManagerId');
-  const approverId = submitter?.employeeDetails?.reportingManagerId;
-  if (!approverId) throw new ApiError(400, 'You have no reporting manager assigned — cannot submit for approval');
+  const { approverId } = req.body;
+  if (!approverId || !mongoose.isValidObjectId(approverId)) {
+    throw new ApiError(400, 'Please select an approver before submitting the MTP');
+  }
+  const eligible = await resolveEligibleApprovers(req.user._id);
+  const chosen = eligible.find((u) => String(u._id) === String(approverId));
+  if (!chosen) {
+    throw new ApiError(403, 'The selected approver is not eligible to approve your MTP');
+  }
 
   if (req.body.remarks !== undefined) plan.remarks = req.body.remarks;
   plan.status = 'pending';
-  plan.approverId = approverId;
+  plan.approverId = chosen._id;
   plan.submittedAt = new Date();
   plan.decidedAt = null;
   plan.decisionNote = '';
   await plan.save();
-  await plan.populate(VISIT_POPULATE);
+  await plan.populate(POPULATE);
 
   await logActivity({
     actor: req.user, action: 'mtp.submit', entityType: 'MonthlyTourPlan', entityId: plan._id,
@@ -149,7 +213,7 @@ export const withdrawMtp = asyncHandler(async (req, res) => {
 
   plan.status = 'withdrawn';
   await plan.save();
-  await plan.populate(VISIT_POPULATE);
+  await plan.populate(POPULATE);
   await logActivity({ actor: req.user, action: 'mtp.withdraw', entityType: 'MonthlyTourPlan', entityId: plan._id, message: `MTP for ${plan.month} withdrawn` });
   res.status(200).json({ success: true, message: 'MTP withdrawn', mtp: plan });
 });
@@ -175,7 +239,7 @@ export const decideMtp = asyncHandler(async (req, res) => {
   plan.decidedAt = new Date();
   plan.decisionNote = note || '';
   await plan.save();
-  await plan.populate(VISIT_POPULATE);
+  await plan.populate(POPULATE);
 
   await logActivity({
     actor: req.user, action: `mtp.${status}`, entityType: 'MonthlyTourPlan', entityId: plan._id,
@@ -193,7 +257,7 @@ export const listPendingApprovals = asyncHandler(async (req, res) => {
   }
   const plans = await MonthlyTourPlan.find(filter)
     .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce')
-    .populate(VISIT_POPULATE)
+    .populate(POPULATE)
     .sort({ submittedAt: 1 });
   res.status(200).json({ success: true, data: plans });
 });
@@ -212,7 +276,7 @@ export const listTeamMtp = asyncHandler(async (req, res) => {
 
   const plans = await MonthlyTourPlan.find(filter)
     .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce')
-    .populate(VISIT_POPULATE)
+    .populate(POPULATE)
     .sort({ month: -1 })
     .limit(2000);
   res.status(200).json({ success: true, data: plans });

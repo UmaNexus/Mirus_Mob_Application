@@ -12,7 +12,7 @@ import User from '../models/User.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { paisaToRupees } from '../utils/money.js';
-import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds, canAccessFieldOpsUser, buildReportingChainAbove } from '../middleware/fieldForceAuth.js';
+import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds, canAccessFieldOpsUser, buildReportingChainAbove, resolveJointCallParticipants } from '../middleware/fieldForceAuth.js';
 
 const dateKeyOf = (d) => new Date(d).toISOString().slice(0, 10);
 const todayKey = () => dateKeyOf(new Date());
@@ -62,6 +62,21 @@ export const getMyReportingChain = asyncHandler(async (req, res) => {
   const managers = await User.find({ _id: { $in: chainIds } })
     .select('personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce');
   res.status(200).json({ success: true, data: managers });
+});
+
+/**
+ * GET /api/field-force/joint-call-participants — the caller's own eligible
+ * Joint Call companions / Manager Meeting participants, split into
+ * `managers` (real ASM/RSM/ZSM/NSM above them — never Admin) and `others`
+ * (same-ASM/team BDMs — never a company-wide BDM list). See
+ * `resolveJointCallParticipants` for the authorization rule; the client
+ * only ever gets to choose among what this endpoint actually returns, and
+ * `createDcr`/`upsertWorkType` independently re-derive the same set on
+ * submit rather than trusting whatever the client remembered from this call.
+ */
+export const getJointCallParticipants = asyncHandler(async (req, res) => {
+  const participants = await resolveJointCallParticipants(req.user._id);
+  res.status(200).json({ success: true, data: participants });
 });
 
 /**

@@ -61,10 +61,15 @@ export const iconSizes = {
 
 export const shadow = {
   card: {
+    // Native (iOS reads shadow*, Android reads elevation) and web (reads
+    // boxShadow — react-native-web deprecated the shadow* props) versions of
+    // the same soft card shadow, kept side by side rather than picked apart
+    // by platform since RN safely ignores keys the current platform doesn't use.
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
     shadowRadius: 8,
-    elevation: 2
+    elevation: 2,
+    boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.06)'
   }
 };

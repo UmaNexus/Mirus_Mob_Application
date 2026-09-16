@@ -9,7 +9,10 @@ export const create = (payload) => api.post('/mtp', payload).then((res) => res.d
 /** Edits one specific still-editable (draft/rejected/withdrawn) tour by id. */
 export const update = (id, payload) => api.patch(`/mtp/${id}`, payload).then((res) => res.data.mtp);
 
-export const submit = (id, remarks) => api.patch(`/mtp/${id}/submit`, { remarks }).then((res) => res.data.mtp);
+/** The caller's own eligible approvers (real reporting-chain managers, ASM+) — the only valid source for "Select Approver". */
+export const listApprovers = () => api.get('/mtp/approvers').then((res) => res.data.data);
+
+export const submit = (id, approverId, remarks) => api.patch(`/mtp/${id}/submit`, { approverId, remarks }).then((res) => res.data.mtp);
 
 export const withdraw = (id) => api.patch(`/mtp/${id}/withdraw`).then((res) => res.data.mtp);
 

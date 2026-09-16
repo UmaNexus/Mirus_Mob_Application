@@ -109,6 +109,74 @@ test('a BDM cannot claim an unrelated manager accompanied them', async () => {
   assert.equal(res.status, 403);
 });
 
+test('a same-ASM teammate BDM can accompany a joint work type', async () => {
+  const { company, bdmAgent, asm } = await setupAsmBdm();
+  const teammate = await createUser({
+    companyId: company._id, email: 'teammate-wt@xyz.com',
+    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+  });
+  const res = await bdmAgent.post('/api/work-type').send({ date: '2026-08-12', type: 'joint', details: { accompaniedBy: String(teammate._id) } });
+  assert.equal(res.status, 200);
+});
+
+// ---------- Meeting: Manager Meeting or Team Meeting, never a DCR call ----------
+
+test('a Manager Meeting can select an eligible manager (ASM/RSM/ZSM/NSM)', async () => {
+  const { bdmAgent, asm } = await setupAsmBdm();
+  const res = await bdmAgent.post('/api/work-type').send({
+    date: '2026-08-12', type: 'meeting', details: { meetingWith: String(asm._id), agenda: 'Weekly sync', venue: 'Office' }
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.workType.details.meetingWith, String(asm._id));
+});
+
+test('Admin cannot be selected as a Manager Meeting participant', async () => {
+  const company = await getDefaultCompany();
+  const { user: admin } = await authAgent(app, { company, email: 'admin-meeting@xyz.com', role: 'admin' });
+  const nsm = await createUser({ companyId: company._id, email: 'nsm-meeting@xyz.com', employeeDetails: { fieldForce: { tier: 'NSM' }, reportingManagerId: admin._id } });
+  const bdm = await createUser({
+    companyId: company._id, email: 'bdm-meeting@xyz.com', password: 'Password1',
+    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: nsm._id }
+  });
+  const bdmAgent = await loginAs(company, bdm);
+
+  const res = await bdmAgent.post('/api/work-type').send({
+    date: '2026-08-12', type: 'meeting', details: { meetingWith: String(admin._id), agenda: 'Escalation', venue: 'Office' }
+  });
+  assert.equal(res.status, 403);
+});
+
+test('a Team Meeting can be logged (meetingWith: "team", not a real user id)', async () => {
+  const { bdmAgent } = await setupAsmBdm();
+  const res = await bdmAgent.post('/api/work-type').send({
+    date: '2026-08-12', type: 'meeting', details: { meetingWith: 'team', agenda: 'Monthly team huddle', venue: 'Regional office' }
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.workType.details.meetingWith, 'team');
+});
+
+test('a meeting requires meetingWith', async () => {
+  const { bdmAgent } = await setupAsmBdm();
+  const res = await bdmAgent.post('/api/work-type').send({ date: '2026-08-12', type: 'meeting', details: { agenda: 'No participant chosen' } });
+  assert.equal(res.status, 400);
+});
+
+test('confirming a meeting creates only a WorkType entry — never a DCR log', async () => {
+  const { bdmAgent } = await setupAsmBdm();
+  const res = await bdmAgent.post('/api/work-type').send({
+    date: '2026-08-12', type: 'meeting', details: { meetingWith: 'team', agenda: 'Standup', venue: 'Office' }
+  });
+  assert.equal(res.status, 200);
+
+  const dcrList = await bdmAgent.get('/api/dcr?date=2026-08-12');
+  assert.equal(dcrList.status, 200);
+  assert.equal(dcrList.body.data.length, 0, 'a meeting must never create a DailyCallReport row, so no DCR pending call exists');
+
+  const wtList = await bdmAgent.get('/api/work-type?date=2026-08-12');
+  assert.equal(wtList.body.data.length, 1);
+  assert.equal(wtList.body.data[0].type, 'meeting');
+});
+
 // ---------- Upsert semantics ----------
 
 test('posting a second work type for the same day updates it, not duplicates it', async () => {

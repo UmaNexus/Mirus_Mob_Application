@@ -6,6 +6,7 @@ import { useAsync } from '../../hooks/useAsync';
 import * as workTypeApi from '../../api/workType';
 import * as doctorsApi from '../../api/doctors';
 import * as dcrApi from '../../api/dcr';
+import * as fieldForceApi from '../../api/fieldForce';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
 import FormField from '../../components/FormField';
@@ -31,15 +32,21 @@ const LEAVE_TYPES = ['Casual', 'Sick', 'Earned', 'Unpaid', 'Maternity', 'Other']
 const today = () => new Date().toISOString().slice(0, 10);
 
 /**
- * "What am I doing today" — a quick activity log. For individual/joint/camp/
- * meeting, "Confirm & Log Call" does NOT just record a work-type marker: it
- * creates the actual DCR row via the same POST /api/dcr the DCR screen
- * itself uses, so the activity shows up in today's Daily DCR automatically
- * with nothing further to create there — including on a day whose DCR was
- * already submitted (that is allowed, and is what puts the day into "Needs
+ * "What am I doing today" — a quick activity log. For individual/joint/camp,
+ * "Confirm & Log Call" does NOT just record a work-type marker: it creates
+ * the actual DCR row via the same POST /api/dcr the DCR screen itself uses,
+ * so the activity shows up in today's Daily DCR automatically with nothing
+ * further to create there — including on a day whose DCR was already
+ * submitted (that is allowed, and is what puts the day into "Needs
  * Resubmission"). The WorkType marker is still set alongside it (existing
  * behavior, best-effort — its failure never blocks the DCR row, which is
  * the record that actually matters).
+ *
+ * Meeting is deliberately different: it is an internal, non-doctor activity
+ * ("Manager Meeting" with an eligible ASM/RSM/ZSM/NSM, or "Team Meeting")
+ * and is recorded ONLY as a WorkType entry — confirming a meeting never
+ * creates a DCR row (see workTypeController.js / dcrController.js for the
+ * server-side enforcement of this).
  */
 export default function WorkTypeScreen({ navigation }) {
   const [type, setType] = useState('individual');
@@ -47,9 +54,11 @@ export default function WorkTypeScreen({ navigation }) {
   const [doctorId, setDoctorId] = useState(null);
   const [productName, setProductName] = useState('');
   const [accompaniedBy, setAccompaniedBy] = useState(null);
+  const [participantTab, setParticipantTab] = useState('managers');
   const [campName, setCampName] = useState('');
   const [venue, setVenue] = useState('');
   const [agenda, setAgenda] = useState('');
+  const [meetingWith, setMeetingWith] = useState('team');
   const [leaveType, setLeaveType] = useState('Casual');
   const [fromDate, setFromDate] = useState(today());
   const [toDate, setToDate] = useState(today());
@@ -60,22 +69,33 @@ export default function WorkTypeScreen({ navigation }) {
   const [saved, setSaved] = useState(false); // camp/meeting/sick/leave confirmation
 
   const doctors = useAsync(doctorsApi.listMine, []);
-  const chain = useAsync(dcrApi.myChain, []);
+  const participants = useAsync(fieldForceApi.getJointCallParticipants, []);
   const doctorOptions = (doctors.data || []).map((d) => ({ label: d.name, value: d._id, sublabel: d.speciality }));
-  const managerOptions = (chain.data || []).map((m) => ({
-    label: `${m.personalDetails?.firstName || ''} ${m.personalDetails?.lastName || ''}`.trim(),
-    value: m._id, sublabel: m.employeeDetails?.fieldForce?.tier
-  }));
+
+  const userLabel = (u) => `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim() || 'Unnamed';
+  const userSublabel = (u) => [u.employeeDetails?.fieldForce?.tier, u.employeeDetails?.fieldForce?.territory].filter(Boolean).join(' · ');
+  const managerOptions = (participants.data?.managers || []).map((m) => ({ label: userLabel(m), value: m._id, sublabel: userSublabel(m) }));
+  const otherOptions = (participants.data?.others || []).map((m) => ({ label: userLabel(m), value: m._id, sublabel: userSublabel(m) }));
+  // Joint Call: two categories — real managers above the BDM (ASM/RSM/ZSM/NSM,
+  // never Admin) and same-ASM/team BDMs, switched via a Managers/Others
+  // toggle. Meeting's "Meeting With" reuses just the manager list, plus a
+  // synthetic "Team Meeting" option (never a fake user).
+  const meetingWithOptions = [
+    { label: 'Team Meeting', value: 'team', sublabel: 'Internal meeting with your team' },
+    ...managerOptions
+  ];
 
   const selectedDoctor = useMemo(() => (doctors.data || []).find((d) => d._id === doctorId), [doctors.data, doctorId]);
 
   const resetCallForm = () => {
-    setDoctorId(null); setProductName(''); setAccompaniedBy(null);
-    setCampName(''); setAgenda(''); setVenue('');
+    setDoctorId(null); setProductName(''); setAccompaniedBy(null); setParticipantTab('managers');
+    setCampName(''); setAgenda(''); setVenue(''); setMeetingWith('team');
     setLogged(null);
   };
 
   const changeType = (v) => { setType(v); setError(null); setSaved(false); setLogged(null); };
+
+  const selectParticipantTab = (tab) => { setParticipantTab(tab); setAccompaniedBy(null); };
 
   const handleSubmit = async () => {
     setError(null);
@@ -98,6 +118,7 @@ export default function WorkTypeScreen({ navigation }) {
           });
         } catch { /* non-critical */ }
         setLogged(dcr);
+<<<<<<< Updated upstream
       } else if (type === 'camp' || type === 'meeting') {
         const activityName = type === 'camp' ? campName.trim() : agenda.trim();
         const dcr = await dcrApi.create({
@@ -106,15 +127,21 @@ export default function WorkTypeScreen({ navigation }) {
         venue: venue.trim(),
         productsDetailed: productName.trim() ? [productName.trim()] : []
       });
+=======
+      } else if (type === 'camp') {
+        const activityName = campName.trim();
+        const dcr = await dcrApi.create({ type, activityName, venue: venue.trim() });
+>>>>>>> Stashed changes
         try {
-          await workTypeApi.upsert({
-            date, type,
-            details: type === 'camp' ? { campName, venue } : { agenda, venue }
-          });
+          await workTypeApi.upsert({ date, type, details: { campName, venue } });
         } catch { /* non-critical */ }
         setLogged(dcr);
       } else {
+        // Meeting is an internal activity — Work Type only, never a DCR
+        // call (a Meeting has no doctor, so it must never create a
+        // DailyCallReport row; see workTypeController.js/dcrController.js).
         const details = {};
+        if (type === 'meeting') { details.meetingWith = meetingWith; details.agenda = agenda; details.venue = venue; }
         if (type === 'sick' || type === 'leave') { details.leaveType = leaveType; details.fromDate = fromDate; details.toDate = toDate; details.reason = reason; }
         await workTypeApi.upsert({ date, type, details });
         setSaved(true);
@@ -127,11 +154,11 @@ export default function WorkTypeScreen({ navigation }) {
   };
 
   const isCallType = type === 'individual' || type === 'joint';
-  const isLoggableType = isCallType || type === 'camp' || type === 'meeting';
+  const isLoggableType = isCallType || type === 'camp';
   const canSubmit = isCallType
     ? Boolean(doctorId) && !(type === 'joint' && !accompaniedBy)
     : type === 'camp' ? Boolean(campName.trim())
-    : type === 'meeting' ? Boolean(agenda.trim())
+    : type === 'meeting' ? Boolean(agenda.trim()) && Boolean(meetingWith)
     : true;
 
   return (
@@ -183,7 +210,29 @@ export default function WorkTypeScreen({ navigation }) {
           <View style={styles.subForm}>
             <SelectField label="Doctor Name" value={doctorId} onChange={setDoctorId} options={doctorOptions} placeholder="Search doctor" searchable />
             {type === 'joint' && (
-              <SelectField label="Accompanied by (manager)" value={accompaniedBy} onChange={setAccompaniedBy} options={managerOptions} placeholder="Select manager" />
+              <View style={styles.participantGroup}>
+                <Text style={typography.label}>Accompanied By</Text>
+                <View style={styles.tabRow}>
+                  <Pressable
+                    onPress={() => selectParticipantTab('managers')}
+                    style={[styles.tab, participantTab === 'managers' && styles.tabActive]}
+                  >
+                    <Text style={[styles.tabText, participantTab === 'managers' && styles.tabTextActive]}>Managers</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => selectParticipantTab('others')}
+                    style={[styles.tab, participantTab === 'others' && styles.tabActive]}
+                  >
+                    <Text style={[styles.tabText, participantTab === 'others' && styles.tabTextActive]}>Others</Text>
+                  </Pressable>
+                </View>
+                <SelectField
+                  value={accompaniedBy}
+                  onChange={setAccompaniedBy}
+                  options={participantTab === 'managers' ? managerOptions : otherOptions}
+                  placeholder={participantTab === 'managers' ? 'Select a manager' : 'Select a teammate'}
+                />
+              </View>
             )}
             <FormField label="Area / Location" value={selectedDoctor?.area || ''} editable={false} placeholder="Select a doctor first" />
             <FormField label="Product Name" value={productName} onChangeText={setProductName} placeholder="e.g. Neurogain" />
@@ -198,8 +247,9 @@ export default function WorkTypeScreen({ navigation }) {
           </View>
         )}
 
-        {type === 'meeting' && !logged && (
+        {type === 'meeting' && (
           <View style={styles.subForm}>
+            <SelectField label="Meeting With" value={meetingWith} onChange={setMeetingWith} options={meetingWithOptions} placeholder="Select team or manager" />
             <FormField label="Agenda / purpose" value={agenda} onChangeText={setAgenda} placeholder="Describe the agenda…" multiline numberOfLines={3} />
             <FormField label="Location" value={venue} onChangeText={setVenue} placeholder="Office / virtual / field" />
           </View>
@@ -215,9 +265,9 @@ export default function WorkTypeScreen({ navigation }) {
         )}
 
         <ErrorBanner message={error} />
-        {saved && <StatusBadge label="Work type saved" tone="success" />}
+        {saved && <StatusBadge label={type === 'meeting' ? 'Meeting logged' : 'Work type saved'} tone="success" />}
         {!(isLoggableType && logged) && (
-          <Button icon={Send} title="Confirm & Log Call" onPress={handleSubmit} loading={submitting} disabled={!canSubmit} />
+          <Button icon={Send} title={type === 'meeting' ? 'Confirm & Log Meeting' : 'Confirm & Log Call'} onPress={handleSubmit} loading={submitting} disabled={!canSubmit} />
         )}
       </ScrollView>
     </SafeAreaView>
@@ -233,6 +283,12 @@ const styles = StyleSheet.create({
   tileLabel: { fontSize: 11, fontWeight: '700', color: colors.ink, textAlign: 'center' },
   tileLabelSelected: { color: colors.primary },
   subForm: { gap: spacing.sm, backgroundColor: colors.card, borderRadius: radii.lg, borderWidth: 1, borderColor: colors.line, padding: spacing.md },
+  participantGroup: { gap: spacing.xs },
+  tabRow: { flexDirection: 'row', gap: spacing.xs },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: spacing.sm, borderRadius: radii.md, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface },
+  tabActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  tabText: { fontSize: 13, fontWeight: '700', color: colors.muted },
+  tabTextActive: { color: colors.primary },
   successCard: { gap: spacing.xs },
   successHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   successTitle: { fontSize: 15, fontWeight: '700', color: colors.ink },

@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Check, Plus, Save, Send, Undo2, Pencil, Trash2 } from 'lucide-react-native';
+import { Plus, Save, Send, Undo2, Pencil, Trash2 } from 'lucide-react-native';
 import { useAsync } from '../../hooks/useAsync';
 import * as mtpApi from '../../api/mtp';
 import * as doctorsApi from '../../api/doctors';
@@ -10,13 +10,12 @@ import Button from '../../components/Button';
 import FormField from '../../components/FormField';
 import SelectField from '../../components/SelectField';
 import StatusBadge from '../../components/StatusBadge';
-import LoadingView from '../../components/LoadingView';
 import ErrorBanner from '../../components/ErrorBanner';
 import SuccessBanner from '../../components/SuccessBanner';
 import { colors, radii, spacing, typography, iconSizes } from '../../theme';
 import {
   monthKey, daysInMonth, firstWeekdayMonFirst, monthLabel, shortDate, rangeLabel,
-  datesBetween, blocksFromVisits, areaLookupFromPopulatedVisits, flattenBlocks
+  datesBetween, blocksFromVisits, flattenBlocks
 } from '../../utils/mtpBlocks';
 
 const EDITABLE_STATUSES = ['draft', 'rejected', 'withdrawn'];
@@ -35,8 +34,13 @@ const BLOCK_PALETTE = [
  * BDM may hold several of these per month; this screen only ever
  * creates/edits the ONE tour it was opened for — it never looks up or
  * touches "the month's plan" the way the old one-plan-per-month screen did.
- * Range building (tap start date, tap end date, area, doctors, Add to Tour
- * Plan) is unchanged from the single-tour version of this screen.
+ *
+ * MTP answers "where will the BDM work, and when" — a date range plus an
+ * Area/Location, nothing more. There is deliberately no doctor selection
+ * here: which doctors get visited is decided later, day-by-day, through
+ * Today's Work Type/DCR. Authorized areas are read from the BDM's own
+ * assigned doctors (the existing Doctor.area/territory data) — there is no
+ * separate Area model to introduce.
  */
 export default function TourDetailScreen({ route, navigation }) {
   const initialPlan = route.params?.plan || null;
@@ -46,13 +50,19 @@ export default function TourDetailScreen({ route, navigation }) {
   const [activePlanId, setActivePlanId] = useState(initialPlan?._id || null);
   const editable = !plan || EDITABLE_STATUSES.includes(plan.status);
 
-  const doctorsQuery = useAsync(() => doctorsApi.listMine({ month }), [month]);
-  const doctors = doctorsQuery.data || [];
-  const doctorMap = useMemo(() => new Map(doctors.map((d) => [String(d._id), d])), [doctors]);
-  const areas = useMemo(() => [...new Set(doctors.map((d) => d.area).filter(Boolean))].sort(), [doctors]);
+  const doctorsQuery = useAsync(() => doctorsApi.listMine(), []);
+  const areas = useMemo(() => [...new Set((doctorsQuery.data || []).map((d) => d.area).filter(Boolean))].sort(), [doctorsQuery.data]);
+
+  const approversQuery = useAsync(() => mtpApi.listApprovers(), []);
+  const approverOptions = useMemo(() => (approversQuery.data || []).map((a) => ({
+    label: `${a.personalDetails?.firstName || ''} ${a.personalDetails?.lastName || ''}`.trim() || 'Unnamed',
+    value: a._id,
+    sublabel: [a.employeeDetails?.fieldForce?.tier || (a.role === 'admin' || a.role === 'superadmin' ? 'Admin' : null), a.employeeDetails?.fieldForce?.territory].filter(Boolean).join(' · ')
+  })), [approversQuery.data]);
+  const [approverId, setApproverId] = useState(null);
 
   const [blocks, setBlocks] = useState(() => (
-    initialPlan ? blocksFromVisits(initialPlan.plannedVisits || [], areaLookupFromPopulatedVisits(initialPlan.plannedVisits || [])) : []
+    initialPlan ? blocksFromVisits(initialPlan.plannedVisits || []) : []
   ));
   const [remarks, setRemarks] = useState(initialPlan?.remarks || '');
 
@@ -60,10 +70,8 @@ export default function TourDetailScreen({ route, navigation }) {
   const [pendingStart, setPendingStart] = useState(null);
   const [pendingEnd, setPendingEnd] = useState(null);
   const [pendingArea, setPendingArea] = useState(null);
-  const [pendingDoctorIds, setPendingDoctorIds] = useState(() => new Set());
   const [blockError, setBlockError] = useState(null);
   const hasPendingRange = Boolean(pendingStart && pendingEnd);
-  const pendingAreaDoctors = useMemo(() => (pendingArea ? doctors.filter((d) => d.area === pendingArea) : []), [doctors, pendingArea]);
 
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -74,63 +82,51 @@ export default function TourDetailScreen({ route, navigation }) {
 
   const summary = useMemo(() => {
     const dateSet = new Set();
-    const doctorIds = new Set();
     const areaSet = new Set();
     blocks.forEach((b) => {
       datesBetween(b.startDate, b.endDate).forEach((d) => dateSet.add(d));
-      b.doctorIds.forEach((id) => doctorIds.add(id));
       areaSet.add(b.area);
     });
-    return { rangeCount: blocks.length, tourDays: dateSet.size, areaCount: areaSet.size, doctorCount: doctorIds.size, totalVisits: plannedVisits.length };
-  }, [blocks, plannedVisits]);
+    return { rangeCount: blocks.length, tourDays: dateSet.size, areaCount: areaSet.size };
+  }, [blocks]);
 
-  const resetPending = () => { setPendingStart(null); setPendingEnd(null); setPendingArea(null); setPendingDoctorIds(new Set()); setBlockError(null); };
+  const resetPending = () => { setPendingStart(null); setPendingEnd(null); setPendingArea(null); setBlockError(null); };
 
   const handleDayPress = (dateKey) => {
     if (!editable) return;
     setBlockError(null);
     if (!pendingStart || hasPendingRange) {
-      setPendingStart(dateKey); setPendingEnd(null); setPendingArea(null); setPendingDoctorIds(new Set());
+      setPendingStart(dateKey); setPendingEnd(null); setPendingArea(null);
       return;
     }
     if (dateKey < pendingStart) { setPendingEnd(pendingStart); setPendingStart(dateKey); } else { setPendingEnd(dateKey); }
   };
 
-  const toggleDoctor = (id) => {
-    setPendingDoctorIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-
   const handleAddRange = () => {
     setBlockError(null);
-    if (!pendingStart || !pendingEnd || !pendingArea || pendingDoctorIds.size === 0) return;
+    if (!pendingStart || !pendingEnd || !pendingArea) return;
 
     const newDates = datesBetween(pendingStart, pendingEnd);
-    const existingPairs = new Set();
-    blocks.forEach((b) => datesBetween(b.startDate, b.endDate).forEach((d) => b.doctorIds.forEach((id) => existingPairs.add(`${id}_${d}`))));
+    const existingDates = new Set();
+    blocks.forEach((b) => datesBetween(b.startDate, b.endDate).forEach((d) => existingDates.add(d)));
 
     for (const date of newDates) {
-      for (const doctorId of pendingDoctorIds) {
-        if (existingPairs.has(`${doctorId}_${date}`)) {
-          setBlockError(`${doctorMap.get(doctorId)?.name || 'This doctor'} is already planned on ${shortDate(date)} in another range in this tour.`);
-          return;
-        }
+      if (existingDates.has(date)) {
+        setBlockError(`${shortDate(date)} is already assigned to another date range in this tour. Date ranges cannot overlap.`);
+        return;
       }
     }
 
     setBlocks((prev) => [...prev, {
       id: `new_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      startDate: pendingStart, endDate: pendingEnd, area: pendingArea, doctorIds: [...pendingDoctorIds]
+      startDate: pendingStart, endDate: pendingEnd, area: pendingArea
     }]);
     resetPending();
   };
 
   const handleEditBlock = (block) => {
     setBlocks((prev) => prev.filter((b) => b.id !== block.id));
-    setPendingStart(block.startDate); setPendingEnd(block.endDate); setPendingArea(block.area); setPendingDoctorIds(new Set(block.doctorIds));
+    setPendingStart(block.startDate); setPendingEnd(block.endDate); setPendingArea(block.area);
     setBlockError(null);
   };
 
@@ -166,7 +162,13 @@ export default function TourDetailScreen({ route, navigation }) {
     }
   };
 
-  const handleSubmit = () => runAction(() => mtpApi.submit(activePlanId, remarks), 'Submitted for approval.');
+  const handleSubmit = () => {
+    if (!approverId) {
+      setError('Please select an approver before submitting the MTP.');
+      return;
+    }
+    runAction(() => mtpApi.submit(activePlanId, approverId, remarks), 'Submitted for approval.');
+  };
   const handleWithdraw = () => runAction(() => mtpApi.withdraw(activePlanId), 'Withdrawn.');
 
   return (
@@ -182,6 +184,12 @@ export default function TourDetailScreen({ route, navigation }) {
         <CalendarGrid month={month} blocks={blocks} pendingStart={pendingStart} pendingEnd={pendingEnd} onDayPress={editable ? handleDayPress : undefined} />
 
         {plan?.submittedAt && <Text style={styles.meta}>Submitted {new Date(plan.submittedAt).toLocaleString()}</Text>}
+        {plan?.approverId && (
+          <Text style={styles.meta}>
+            Approver: {`${plan.approverId.personalDetails?.firstName || ''} ${plan.approverId.personalDetails?.lastName || ''}`.trim() || 'Unnamed'}
+            {plan.approverId.employeeDetails?.fieldForce?.tier ? ` · ${plan.approverId.employeeDetails.fieldForce.tier}` : ''}
+          </Text>
+        )}
         {plan?.decidedAt && <Text style={styles.meta}>Decided {new Date(plan.decidedAt).toLocaleString()}{plan.decisionNote ? ` — ${plan.decisionNote}` : ''}</Text>}
 
         {editable && (
@@ -205,40 +213,13 @@ export default function TourDetailScreen({ route, navigation }) {
                 <SelectField
                   label="Select Area"
                   value={pendingArea}
-                  onChange={(v) => { setPendingArea(v); setPendingDoctorIds(new Set()); }}
+                  onChange={setPendingArea}
                   options={areas.map((a) => ({ label: a, value: a }))}
                   placeholder={areas.length ? 'Select an area' : 'No areas assigned yet'}
                 />
 
-                {pendingArea && (
-                  <View style={styles.doctorList}>
-                    <Text style={typography.label}>Doctors in {pendingArea}</Text>
-                    {pendingAreaDoctors.length === 0 && <Text style={styles.hint}>No doctors assigned in this area.</Text>}
-                    {pendingAreaDoctors.map((d) => (
-                      <Pressable key={d._id} onPress={() => toggleDoctor(d._id)} style={styles.doctorRow}>
-                        <View style={[styles.checkbox, pendingDoctorIds.has(d._id) && styles.checkboxChecked]}>
-                          {pendingDoctorIds.has(d._id) ? <Check size={14} color={colors.white} strokeWidth={3} /> : null}
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.doctorName}>{d.name}</Text>
-                          <Text style={styles.doctorMeta}>
-                            {d.speciality || 'General'}
-                            {d.lastVisitAt ? ` · Last visit ${new Date(d.lastVisitAt).toLocaleDateString()}` : ' · No visits yet'}
-                            {d.plannedVisitsThisMonth ? ` · ${d.plannedVisitsThisMonth} planned this month` : ''}
-                          </Text>
-                        </View>
-                      </Pressable>
-                    ))}
-                    {pendingDoctorIds.size > 0 && (
-                      <Text style={styles.applyHint}>
-                        {[...pendingDoctorIds].map((id) => doctorMap.get(id)?.name).filter(Boolean).join(', ')} will be planned on every date from {rangeLabel(pendingStart, pendingEnd)}.
-                      </Text>
-                    )}
-                  </View>
-                )}
-
                 <ErrorBanner message={blockError} />
-                <Button icon={Plus} title="Add to Tour Plan" onPress={handleAddRange} disabled={!pendingArea || pendingDoctorIds.size === 0} />
+                <Button icon={Plus} title="Add to Tour Plan" onPress={handleAddRange} disabled={!pendingArea} />
               </>
             )}
           </Card>
@@ -249,12 +230,13 @@ export default function TourDetailScreen({ route, navigation }) {
           {blocks.length === 0 && <Text style={styles.hint}>No date ranges added yet.</Text>}
           {blocks.map((b, idx) => {
             const palette = BLOCK_PALETTE[idx % BLOCK_PALETTE.length];
+            const dayCount = datesBetween(b.startDate, b.endDate).length;
             return (
               <View key={b.id} style={[styles.blockRow, { borderLeftColor: palette.solid }]}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.blockRange}>{rangeLabel(b.startDate, b.endDate)}</Text>
-                  <Text style={styles.blockArea}>{b.area} · {b.doctorIds.length} doctor{b.doctorIds.length === 1 ? '' : 's'}</Text>
-                  <Text style={styles.blockDoctors}>{b.doctorIds.map((id) => doctorMap.get(id)?.name || 'Doctor').join(', ')}</Text>
+                  <Text style={styles.blockArea}>{b.area}</Text>
+                  <Text style={styles.blockMeta}>{dayCount} tour day{dayCount === 1 ? '' : 's'}</Text>
                 </View>
                 {editable && (
                   <View style={styles.blockActions}>
@@ -279,12 +261,24 @@ export default function TourDetailScreen({ route, navigation }) {
             <SummaryStat value={summary.rangeCount} label="Date ranges" />
             <SummaryStat value={summary.tourDays} label="Tour days" />
             <SummaryStat value={summary.areaCount} label="Areas" />
-            <SummaryStat value={summary.doctorCount} label="Doctors" />
           </View>
-          <Text style={styles.totalVisitsLine}>{summary.totalVisits} planned doctor visit{summary.totalVisits === 1 ? '' : 's'} total</Text>
         </Card>
 
         {editable && <FormField label="Remarks for your manager (optional)" value={remarks} onChangeText={setRemarks} placeholder="Add a note…" multiline numberOfLines={3} />}
+
+        {editable && activePlanId && (
+          <Card style={styles.planCard}>
+            <Text style={typography.label}>Submit for approval</Text>
+            <SelectField
+              label="Select Approver"
+              value={approverId}
+              onChange={setApproverId}
+              options={approverOptions}
+              placeholder={approverOptions.length ? 'Select an approver' : 'No eligible approver found'}
+            />
+            {approversQuery.status === 'error' && <ErrorBanner message={approversQuery.error} />}
+          </Card>
+        )}
 
         <ErrorBanner message={error} />
         <SuccessBanner message={success} />
@@ -389,30 +383,20 @@ const styles = StyleSheet.create({
   cancelLink: { fontSize: 12, color: colors.danger, fontWeight: '600' },
   selectedDatesRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   rangeText: { fontSize: 16, fontWeight: '700', color: colors.primary },
-  applyHint: { fontSize: 11, color: colors.muted, fontStyle: 'italic', marginTop: spacing.xs },
-
-  checkbox: { width: 20, height: 20, borderRadius: 4, borderWidth: 1.5, borderColor: colors.line, alignItems: 'center', justifyContent: 'center' },
-  checkboxChecked: { backgroundColor: colors.primary, borderColor: colors.primary },
-
-  doctorList: { gap: spacing.xs },
-  doctorRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xs },
-  doctorName: { fontSize: 13, fontWeight: '600', color: colors.ink },
-  doctorMeta: { fontSize: 11, color: colors.muted, marginTop: 1 },
 
   blockRow: { flexDirection: 'row', gap: spacing.sm, paddingVertical: spacing.sm, borderLeftWidth: 4, paddingLeft: spacing.sm, marginTop: spacing.xs },
   blockRange: { fontSize: 14, fontWeight: '700', color: colors.ink },
   blockArea: { fontSize: 12, color: colors.muted, marginTop: 1 },
-  blockDoctors: { fontSize: 11, color: colors.muted, marginTop: 2 },
+  blockMeta: { fontSize: 11, color: colors.muted, marginTop: 2 },
   blockActions: { gap: spacing.xs, alignItems: 'flex-end' },
   blockActionBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   blockActionText: { fontSize: 12, color: colors.primary, fontWeight: '600' },
   blockActionDanger: { color: colors.danger },
 
   summaryGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.xs },
-  summaryStat: { width: '50%', alignItems: 'center', paddingVertical: spacing.sm },
+  summaryStat: { width: '33%', alignItems: 'center', paddingVertical: spacing.sm },
   summaryValue: { fontSize: 20, fontWeight: '700', color: colors.ink },
   summaryLabel: { fontSize: 10, color: colors.muted, marginTop: 2 },
-  totalVisitsLine: { fontSize: 12, color: colors.ink, fontWeight: '600', textAlign: 'center', borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.xs },
 
   actionsRow: { flexDirection: 'row', gap: spacing.sm },
   actionBtn: { flex: 1 }

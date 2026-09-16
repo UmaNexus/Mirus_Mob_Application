@@ -166,3 +166,57 @@ export const buildReportingChainAbove = async (userId, { maxDepth = 8 } = {}) =>
 
   return chain;
 };
+
+const PARTICIPANT_SELECT = 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce';
+// The fixed hierarchy's manager tiers — never Admin (no fieldForce.tier of
+// their own) and never BDM (that is the "OTHERS" bucket, not a manager).
+const MANAGER_TIERS = ['ASM', 'RSM', 'ZSM', 'NSM'];
+
+/**
+ * The caller's own eligible Joint Call / Manager Meeting participants:
+ *  - `managers`: every ASM+ tier manager genuinely above them
+ *    (`buildReportingChainAbove` — a straight walk up `reportingManagerId`,
+ *    so it can never include a peer/unrelated user or cross-tenant record).
+ *    Admin is deliberately excluded here even when present in the raw
+ *    chain (unlike MTP's approver list, which does include admin via
+ *    company-wide access) — Admin is not a "manager participant".
+ *  - `others`: every other BDM who shares the caller's own immediate
+ *    reporting manager — the "same ASM/team" rule. Never a company-wide
+ *    BDM list, never another team's BDM.
+ *
+ * Single source of truth for both the mobile picker and server-side
+ * validation of a submitted participant id — see
+ * `isEligibleJointCallParticipant` / `isEligibleManagerParticipant` below.
+ */
+export const resolveJointCallParticipants = async (userId) => {
+  const chainIds = [...(await buildReportingChainAbove(userId))];
+  const chainUsers = chainIds.length ? await User.find({ _id: { $in: chainIds } }).select(PARTICIPANT_SELECT) : [];
+  const managers = chainUsers.filter((u) => MANAGER_TIERS.includes(u.employeeDetails?.fieldForce?.tier));
+
+  const caller = await User.findById(userId).select('employeeDetails.reportingManagerId');
+  const managerId = caller?.employeeDetails?.reportingManagerId;
+  const others = managerId
+    ? await User.find({
+      _id: { $ne: userId },
+      'employeeDetails.reportingManagerId': managerId,
+      'employeeDetails.fieldForce.tier': 'BDM'
+    }).select(PARTICIPANT_SELECT)
+    : [];
+
+  return { managers, others };
+};
+
+/** True if `candidateId` is a genuinely eligible Joint Call companion for `userId` — a real manager above them (ASM/RSM/ZSM/NSM), or a same-team BDM. */
+export const isEligibleJointCallParticipant = async (userId, candidateId) => {
+  if (!candidateId) return false;
+  const { managers, others } = await resolveJointCallParticipants(userId);
+  const candidateIdStr = String(candidateId);
+  return managers.some((u) => String(u._id) === candidateIdStr) || others.some((u) => String(u._id) === candidateIdStr);
+};
+
+/** True if `candidateId` is a genuinely eligible manager-meeting participant for `userId` — a real manager above them; never a BDM peer, never Admin. */
+export const isEligibleManagerParticipant = async (userId, candidateId) => {
+  if (!candidateId) return false;
+  const { managers } = await resolveJointCallParticipants(userId);
+  return managers.some((u) => String(u._id) === String(candidateId));
+};

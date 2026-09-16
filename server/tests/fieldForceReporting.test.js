@@ -63,6 +63,49 @@ test('a top-of-chain user (no reportingManagerId) gets an empty chain, not an er
   assert.deepEqual(res.body.data, []);
 });
 
+// ---------- Joint Call / Manager Meeting participants ----------
+
+test('joint-call-participants returns managers (real chain, ASM+, never Admin) and others (same-ASM teammate BDMs)', async () => {
+  const { company, bdmAgent, asm } = await setupAsmBdm();
+  const teammate = await createUser({
+    companyId: company._id, email: 'teammate-participants@xyz.com',
+    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+  });
+  const unrelatedBdm = await createUser({ companyId: company._id, email: 'unrelated-participants@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+
+  const res = await bdmAgent.get('/api/field-force/joint-call-participants');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.managers.length, 1);
+  assert.equal(String(res.body.data.managers[0]._id), String(asm._id));
+  assert.equal(res.body.data.others.length, 1);
+  assert.equal(String(res.body.data.others[0]._id), String(teammate._id));
+  assert.ok(!res.body.data.others.some((u) => String(u._id) === String(unrelatedBdm._id)), 'an unrelated BDM must never appear in "others"');
+});
+
+test('joint-call-participants never returns Admin among managers, even when Admin is the literal top of the reporting chain', async () => {
+  const company = await getDefaultCompany();
+  const { user: admin } = await authAgent(app, { company, email: 'admin-participants@xyz.com', role: 'admin' });
+  const nsm = await createUser({ companyId: company._id, email: 'nsm-participants@xyz.com', employeeDetails: { fieldForce: { tier: 'NSM' }, reportingManagerId: admin._id } });
+  const bdm = await createUser({
+    companyId: company._id, email: 'bdm-participants@xyz.com', password: 'Password1',
+    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: nsm._id }
+  });
+  const bdmAgent = await loginAs(company, bdm);
+
+  const res = await bdmAgent.get('/api/field-force/joint-call-participants');
+  assert.equal(res.status, 200);
+  const managerIds = res.body.data.managers.map((u) => String(u._id));
+  assert.ok(managerIds.includes(String(nsm._id)));
+  assert.ok(!managerIds.includes(String(admin._id)), 'Admin must never appear as a Joint Call manager option');
+});
+
+test('joint-call-participants "others" is empty for a top-of-chain user with no manager', async () => {
+  const { agent } = await authAgent(app, { email: 'orphan-participants@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  const res = await agent.get('/api/field-force/joint-call-participants');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.data.others, []);
+});
+
 // ---------- Calendar ----------
 
 test('calendar rejects a malformed month and returns the caller\'s own data for a valid one', async () => {
@@ -105,7 +148,7 @@ test('the combined alerts feed includes both doctor and secondary-sale alerts', 
 // ---------- Dashboard: live-computed, not hardcoded ----------
 
 test('the dashboard reflects real submitted data, not fixed numbers', async () => {
-  const { bdmAgent, asmAgent, bdm } = await setupAsmBdm();
+  const { bdmAgent, asmAgent, asm, bdm } = await setupAsmBdm();
   const zero = await bdmAgent.get('/api/field-force/dashboard');
   assert.equal(zero.body.data.todaysCalls, 0);
   assert.equal(zero.body.data.mtpToursThisMonth, 0);
@@ -117,7 +160,7 @@ test('the dashboard reflects real submitted data, not fixed numbers', async () =
   const now = new Date();
   const month = now.toISOString().slice(0, 7);
   const mtp = await bdmAgent.post('/api/mtp').send({ month });
-  await bdmAgent.patch(`/api/mtp/${mtp.body.mtp._id}/submit`).send({});
+  await bdmAgent.patch(`/api/mtp/${mtp.body.mtp._id}/submit`).send({ approverId: String(asm._id) });
 
   const res = await bdmAgent.get('/api/field-force/dashboard');
   assert.equal(res.status, 200);

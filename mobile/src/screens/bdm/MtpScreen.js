@@ -14,7 +14,7 @@ import EmptyState from '../../components/EmptyState';
 import { colors, radii, spacing, typography, iconSizes } from '../../theme';
 import {
   monthKey, daysInMonth, firstWeekdayMonFirst, monthLabel, rangeLabel,
-  datesBetween, blocksFromVisits, areaLookupFromPopulatedVisits
+  datesBetween, blocksFromVisits
 } from '../../utils/mtpBlocks';
 
 const TONE_BY_STATUS = { draft: 'neutral', pending: 'warning', approved: 'success', rejected: 'danger', withdrawn: 'neutral' };
@@ -42,21 +42,18 @@ export default function MtpScreen({ navigation }) {
   const shiftMonth = (delta) => setCursor((prev) => { const next = new Date(prev); next.setMonth(next.getMonth() + delta); return next; });
 
   const tours = useMemo(() => (plans.data || []).map((plan) => {
-    const blocks = blocksFromVisits(plan.plannedVisits || [], areaLookupFromPopulatedVisits(plan.plannedVisits || []));
+    const blocks = blocksFromVisits(plan.plannedVisits || []);
     const dateSet = new Set();
-    const doctorIds = new Set();
     const areaSet = new Set();
     blocks.forEach((b) => {
       datesBetween(b.startDate, b.endDate).forEach((d) => dateSet.add(d));
-      b.doctorIds.forEach((id) => doctorIds.add(id));
       areaSet.add(b.area);
     });
     const sortedBlocks = [...blocks].sort((a, b) => a.startDate.localeCompare(b.startDate));
     const overallRange = sortedBlocks.length
       ? rangeLabel(sortedBlocks[0].startDate, sortedBlocks[sortedBlocks.length - 1].endDate)
       : null;
-    const totalVisits = blocks.reduce((sum, b) => sum + b.doctorIds.length * datesBetween(b.startDate, b.endDate).length, 0);
-    return { plan, blocks: sortedBlocks, tourDays: dateSet.size, doctorCount: doctorIds.size, areas: [...areaSet], totalVisits, overallRange };
+    return { plan, blocks: sortedBlocks, tourDays: dateSet.size, areas: [...areaSet], overallRange };
   }), [plans.data]);
 
   const allBlocksForCalendar = useMemo(
@@ -100,7 +97,7 @@ export default function MtpScreen({ navigation }) {
               </View>
               <Text style={styles.tourArea}>{item.areas.join(', ') || 'No area yet'}</Text>
               <Text style={styles.tourMeta}>
-                {item.doctorCount} doctor{item.doctorCount === 1 ? '' : 's'} · {item.tourDays} tour day{item.tourDays === 1 ? '' : 's'} · {item.totalVisits} planned visit{item.totalVisits === 1 ? '' : 's'}
+                {item.tourDays} tour day{item.tourDays === 1 ? '' : 's'} · {item.areas.length} area{item.areas.length === 1 ? '' : 's'}
               </Text>
               {item.blocks.length > 1 && (
                 <Text style={styles.tourRangesHint}>{item.blocks.length} date ranges in this tour</Text>

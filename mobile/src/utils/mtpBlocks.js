@@ -1,11 +1,14 @@
 /**
  * Shared date-range / "tour block" helpers for the Monthly Tour Plan screens.
- * A "block" is a pure UI/authoring concept — { id, startDate, endDate, area,
- * doctorIds } — that always gets flattened into individual { doctorId, date }
- * rows before it reaches the server; MonthlyTourPlan itself has no concept of
- * a range. Used by both MtpScreen (month view, aggregates blocks across every
- * tour plan in the month) and TourDetailScreen (builds/edits one tour's own
- * blocks).
+ * A "block" is a pure UI/authoring concept — { id, startDate, endDate, area }
+ * — that always gets flattened into individual { area, date } rows before it
+ * reaches the server; MonthlyTourPlan itself has no concept of a range. Used
+ * by both MtpScreen (month view, aggregates blocks across every tour plan in
+ * the month) and TourDetailScreen (builds/edits one tour's own blocks).
+ *
+ * MTP plans WHERE the BDM will work (date + area) — never WHICH doctors,
+ * so a block has no doctor list; doctor-level planning happens later via
+ * Today's Work Type/DCR.
  */
 
 export const monthKey = (d) => d.toISOString().slice(0, 7);
@@ -43,52 +46,39 @@ export const datesBetween = (from, to) => {
 
 /**
  * Rebuild block-shaped ranges from the flat `plannedVisits` a MonthlyTourPlan
- * document actually stores. Consecutive dates carrying the EXACT SAME set of
- * doctors collapse into one block. `doctorArea(doctorId)` resolves a doctor's
- * area — pass a lookup into the BDM's own doctor list, or read straight off
- * an already-populated `v.doctorId.area` when the caller has that.
+ * document actually stores. Consecutive dates carrying the same area
+ * collapse into one block. Falls back to a legacy record's populated
+ * `v.doctorId.area` when `v.area` itself is missing (a plan written before
+ * this change, back when MTP was doctor-based) — reconstructed from real
+ * stored data, never invented.
  */
-export const blocksFromVisits = (visits, doctorArea) => {
+export const blocksFromVisits = (visits) => {
   const byDate = new Map();
   visits.forEach((v) => {
-    const doctorId = String(v.doctorId?._id || v.doctorId);
     const date = new Date(v.date).toISOString().slice(0, 10);
-    if (!byDate.has(date)) byDate.set(date, new Set());
-    byDate.get(date).add(doctorId);
+    const legacyArea = v.doctorId && typeof v.doctorId === 'object' ? v.doctorId.area : null;
+    byDate.set(date, v.area || legacyArea || 'Unknown area');
   });
   const dates = [...byDate.keys()].sort();
   const blocks = [];
   let current = null;
   for (const date of dates) {
-    const doctorIds = [...byDate.get(date)].sort();
-    const key = doctorIds.join(',');
-    if (current && current.key === key && addDays(current.endDate, 1) === date) {
+    const area = byDate.get(date);
+    if (current && current.area === area && addDays(current.endDate, 1) === date) {
       current.endDate = date;
     } else {
       if (current) blocks.push(current);
-      const area = doctorArea(doctorIds[0]) || 'Unassigned area';
-      current = { id: `existing_${date}_${key}`, startDate: date, endDate: date, area, doctorIds, key };
+      current = { id: `existing_${date}`, startDate: date, endDate: date, area };
     }
   }
   if (current) blocks.push(current);
   return blocks;
 };
 
-/** A lookup usable with blocksFromVisits' `doctorArea` param, built from an already-populated plannedVisits array. */
-export const areaLookupFromPopulatedVisits = (visits) => {
-  const map = new Map();
-  visits.forEach((v) => {
-    if (v.doctorId && typeof v.doctorId === 'object') map.set(String(v.doctorId._id), v.doctorId.area);
-  });
-  return (doctorId) => map.get(doctorId);
-};
-
 export const flattenBlocks = (blocks) => {
   const visits = [];
   blocks.forEach((b) => {
-    datesBetween(b.startDate, b.endDate).forEach((date) => {
-      b.doctorIds.forEach((doctorId) => visits.push({ doctorId, date }));
-    });
+    datesBetween(b.startDate, b.endDate).forEach((date) => visits.push({ area: b.area, date }));
   });
   return visits;
 };
