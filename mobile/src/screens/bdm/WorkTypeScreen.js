@@ -100,7 +100,12 @@ export default function WorkTypeScreen({ navigation }) {
         setLogged(dcr);
       } else if (type === 'camp' || type === 'meeting') {
         const activityName = type === 'camp' ? campName.trim() : agenda.trim();
-        const dcr = await dcrApi.create({ type, activityName, venue: venue.trim() });
+        const dcr = await dcrApi.create({
+        type,
+        activityName,
+        venue: venue.trim(),
+        productsDetailed: productName.trim() ? [productName.trim()] : []
+      });
         try {
           await workTypeApi.upsert({
             date, type,
@@ -189,6 +194,7 @@ export default function WorkTypeScreen({ navigation }) {
           <View style={styles.subForm}>
             <FormField label="Camp / event name" value={campName} onChangeText={setCampName} placeholder="e.g. Diabetes CME camp" />
             <FormField label="Venue" value={venue} onChangeText={setVenue} placeholder="Enter venue" />
+            <FormField label="Product Name" value={productName} onChangeText={setProductName} placeholder="e.g. Neurogain" />
           </View>
         )}
 

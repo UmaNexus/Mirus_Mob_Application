@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ClipboardList, CalendarDays, Receipt, ListChecks } from 'lucide-react-native';
+import { ClipboardList, CalendarDays, Receipt, ListChecks,AlertTriangle } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { useAsync } from '../../hooks/useAsync';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
@@ -84,6 +84,41 @@ export default function BdmHomeScreen({ navigation }) {
           </View>
           <ErrorBanner message={punchError} />
         </Card>
+        <Card style={styles.dcrStatusCard}>
+          <View style={styles.dcrStatusHeader}>
+            <Text style={styles.dcrStatusTitle}>DCR STATUS</Text>
+            <Text style={styles.dcrStatusMonth}>
+              {new Date().toLocaleString('en-US', {
+                month: 'long',
+                year: 'numeric'
+              })}
+            </Text>
+          </View>
+
+          <View style={styles.dcrStatusRow}>
+            <Text style={styles.dcrStatusLabel}>
+              DCR submitted: {dashboard.data?.dcrSubmittedDays ?? 0} / {dashboard.data?.dcrWorkingDays ?? 0} days
+            </Text>
+
+            <Text style={styles.dcrStatusPercentage}>
+              {dashboard.data?.dcrSubmissionPercentage ?? 0}%
+            </Text>
+          </View>
+
+          <View style={styles.progressBackground}>
+            <View
+              style={[
+                styles.progressFill,
+                {
+                  width: `${Math.min(
+                    dashboard.data?.dcrSubmissionPercentage ?? 0,
+                    100
+                  )}%`
+                }
+              ]}
+            />
+          </View>
+        </Card>
 
         <Text style={typography.label}>Quick actions</Text>
         <View style={styles.quickGrid}>
@@ -152,5 +187,52 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 20, fontWeight: '700' },
   statLabel: { fontSize: 10, color: colors.muted, marginTop: 2 },
   mtpRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.sm, marginTop: spacing.sm },
-  mtpBadge: { fontSize: 12, fontWeight: '700', color: colors.ink }
+  mtpBadge: { fontSize: 12, fontWeight: '700', color: colors.ink },
+  dcrStatusCard: {
+  marginTop: spacing.md,
+},
+
+dcrStatusHeader: {
+  marginBottom: spacing.md,
+},
+
+dcrStatusTitle: {
+  ...typography.caption,
+  fontWeight: '700',
+},
+
+dcrStatusMonth: {
+  ...typography.body,
+  marginTop: spacing.xs,
+},
+
+dcrStatusRow: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+},
+
+dcrStatusLabel: {
+  ...typography.body,
+  flex: 1,
+},
+
+dcrStatusPercentage: {
+  ...typography.body,
+  fontWeight: '700',
+},
+
+progressBackground: {
+  height: 8,
+  borderRadius: 4,
+  backgroundColor: '#E5E7EB',
+  overflow: 'hidden',
+  marginTop: spacing.sm,
+},
+
+progressFill: {
+  height: '100%',
+  borderRadius: 4,
+  backgroundColor: '#2563EB',
+},
 });

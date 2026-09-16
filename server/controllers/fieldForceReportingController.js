@@ -18,6 +18,35 @@ const dateKeyOf = (d) => new Date(d).toISOString().slice(0, 10);
 const todayKey = () => dateKeyOf(new Date());
 const currentMonth = () => new Date().toISOString().slice(0, 7);
 
+const getWorkingDaysInMonth = (year, month) => {
+  const workingDays = [];
+
+  const date = new Date(Date.UTC(year, month - 1, 1));
+
+  while (date.getUTCMonth() === month - 1) {
+    const day = date.getUTCDay();
+
+    // Monday = 1, Tuesday = 2, ..., Friday = 5
+    if (day >= 1 && day <= 5) {
+      workingDays.push(dateKeyOf(date));
+    }
+
+    date.setUTCDate(date.getUTCDate() + 1);
+  }
+
+  return workingDays;
+};
+
+const getSubmittedDcrDays = async (userId, workingDays) => {
+  const submittedDcrDays = await DailyCallReport.distinct('dateKey', {
+    userId,
+    dateKey: { $in: workingDays },
+    submittedAt: { $ne: null }
+  });
+
+  return submittedDcrDays;
+};
+
 /**
  * GET /api/field-force/my-chain — the caller's own reporting-manager chain
  * (their manager, that manager's manager, and so on), as real user records.
@@ -120,6 +149,22 @@ export const getMyDashboard = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const today = todayKey();
   const month = currentMonth();
+  const [year, monthNumber] = month.split('-').map(Number);
+
+  const workingDays = getWorkingDaysInMonth(year, monthNumber);
+
+  const submittedDcrDays = await getSubmittedDcrDays(
+    userId,
+    workingDays
+  );
+
+  const dcrSubmittedDays = submittedDcrDays.length;
+
+  const dcrWorkingDays = workingDays.length;
+
+  const dcrSubmissionPercentage = dcrWorkingDays > 0
+    ? Math.round((dcrSubmittedDays / dcrWorkingDays) * 100)
+    : 0;
 
   const [todaysCalls, pendingDcrCount, todaysExpenses, mtpsThisMonth, alertsCount] = await Promise.all([
     DailyCallReport.countDocuments({ userId, dateKey: today, type: { $ne: 'missed' } }),
@@ -151,7 +196,10 @@ export const getMyDashboard = asyncHandler(async (req, res) => {
       todaysExpenseTotal: paisaToRupees(todaysExpenses[0]?.total || 0),
       mtpToursThisMonth: mtpsThisMonth.length,
       mtpPendingThisMonth: mtpsThisMonth.filter((p) => p.status === 'pending').length,
-      alertsCount
+      alertsCount,
+      dcrSubmittedDays,
+      dcrWorkingDays,
+      dcrSubmissionPercentage
     }
   });
 });
