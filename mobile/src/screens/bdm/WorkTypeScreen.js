@@ -118,7 +118,6 @@ export default function WorkTypeScreen({ navigation }) {
           });
         } catch { /* non-critical */ }
         setLogged(dcr);
-<<<<<<< Updated upstream
       } else if (type === 'camp' || type === 'meeting') {
         const activityName = type === 'camp' ? campName.trim() : agenda.trim();
         const dcr = await dcrApi.create({
@@ -127,11 +126,7 @@ export default function WorkTypeScreen({ navigation }) {
         venue: venue.trim(),
         productsDetailed: productName.trim() ? [productName.trim()] : []
       });
-=======
-      } else if (type === 'camp') {
-        const activityName = campName.trim();
-        const dcr = await dcrApi.create({ type, activityName, venue: venue.trim() });
->>>>>>> Stashed changes
+      
         try {
           await workTypeApi.upsert({ date, type, details: { campName, venue } });
         } catch { /* non-critical */ }
