@@ -21,6 +21,7 @@ export const STATUS_ICON_BY_LABEL = {
   active: CircleCheck,
   inactive: CircleDot,
   completed: CircleCheck,
+  cancelled: Undo2,
   missed: CircleX
 };
 

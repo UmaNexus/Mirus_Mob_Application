@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ClipboardList, CalendarDays, Receipt, ListChecks,AlertTriangle } from 'lucide-react-native';
+import { ClipboardList, CalendarDays, Receipt, ListChecks, AlertTriangle, Palmtree } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { useAsync } from '../../hooks/useAsync';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
@@ -10,6 +10,7 @@ import * as fieldForceApi from '../../api/fieldForce';
 import { displayName } from '../../navigation/roleHelpers';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
+import StatusBadge from '../../components/StatusBadge';
 import ErrorBanner from '../../components/ErrorBanner';
 import LoadingView from '../../components/LoadingView';
 import { colors, spacing, radii, typography } from '../../theme';
@@ -46,6 +47,8 @@ export default function BdmHomeScreen({ navigation }) {
     }
   };
 
+  const activeLeave = today.data?.activeLeave;
+  const isOnLeaveToday = Boolean(activeLeave || today.data?.status === 'Leave');
   const punchedIn = Boolean(today.data?.punchInAt && !today.data?.punchOutAt);
   const refreshing = today.status === 'loading' && dashboard.status === 'loading';
 
@@ -67,6 +70,10 @@ export default function BdmHomeScreen({ navigation }) {
               <Text style={typography.label}>Attendance</Text>
               {today.status === 'loading' ? (
                 <Text style={styles.punchStatusMuted}>Checking…</Text>
+              ) : isOnLeaveToday && !punchedIn ? (
+                <Text style={[styles.punchStatus, { color: colors.warning }]}>
+                  On Leave Today
+                </Text>
               ) : (
                 <Text style={[styles.punchStatus, { color: punchedIn ? colors.success : colors.danger }]}>
                   {punchedIn ? `Punched in at ${new Date(today.data.punchInAt).toLocaleTimeString()}` : 'Not punched in'}
@@ -77,13 +84,45 @@ export default function BdmHomeScreen({ navigation }) {
               title={punchedIn ? 'Punch Out' : 'Punch In'}
               variant={punchedIn ? 'danger' : 'primary'}
               loading={punchBusy}
-              disabled={today.status === 'loading'}
+              disabled={today.status === 'loading' || (isOnLeaveToday && !punchedIn)}
               onPress={handlePunch}
               style={styles.punchBtn}
             />
           </View>
           <ErrorBanner message={punchError} />
         </Card>
+
+        {/* Leave Status / Apply Leave */}
+        <Card style={styles.leaveCard} onPress={() => navigation.navigate('ApplyLeave')}>
+          <View style={styles.leaveRow}>
+            <View style={styles.leaveLeft}>
+              <View style={[styles.leaveIconBox, isOnLeaveToday && styles.leaveIconBoxActive]}>
+                <Palmtree size={20} color={isOnLeaveToday ? colors.success : colors.primary} />
+              </View>
+              <View style={styles.leaveTextGroup}>
+                <Text style={styles.leaveTitle}>
+                  {isOnLeaveToday ? 'On Leave Today' : 'Apply Leave'}
+                </Text>
+                <Text style={styles.leaveSubtitle}>
+                  {isOnLeaveToday
+                    ? (activeLeave?.type ? `Approved ${activeLeave.type} Leave` : 'Approved leave for today')
+                    : 'Request planned or sick leave'}
+                </Text>
+              </View>
+            </View>
+            {isOnLeaveToday ? (
+              <StatusBadge label="On Leave" tone="success" />
+            ) : (
+              <Button
+                title="Apply"
+                variant="outline"
+                onPress={() => navigation.navigate('ApplyLeave')}
+                style={styles.leaveBtn}
+              />
+            )}
+          </View>
+        </Card>
+
         <Card style={styles.dcrStatusCard}>
           <View style={styles.dcrStatusHeader}>
             <Text style={styles.dcrStatusTitle}>DCR STATUS</Text>
@@ -180,6 +219,24 @@ const styles = StyleSheet.create({
   punchStatus: { fontSize: 13, fontWeight: '600', marginTop: 2 },
   punchStatusMuted: { fontSize: 13, color: colors.muted, marginTop: 2 },
   punchBtn: { minWidth: 120 },
+  leaveCard: { paddingVertical: spacing.md },
+  leaveRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  leaveLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flex: 1 },
+  leaveIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  leaveIconBoxActive: {
+    backgroundColor: colors.successSoft
+  },
+  leaveTextGroup: { flex: 1 },
+  leaveTitle: { fontSize: 15, fontWeight: '700', color: colors.ink },
+  leaveSubtitle: { fontSize: 12, color: colors.muted, marginTop: 2 },
+  leaveBtn: { minWidth: 80 },
   quickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   quickItem: { width: '47%' },
   statGrid: { flexDirection: 'row', flexWrap: 'wrap' },

@@ -66,7 +66,15 @@ export const upsertWorkType = asyncHandler(async (req, res) => {
     const to = new Date(toDate);
     if (to < from) throw new ApiError(400, 'details.toDate cannot be before details.fromDate');
     const days = Math.round((to - from) / 86400000) + 1;
-    const leave = await LeaveRequest.create({ userId: req.user._id, type: leaveType, fromDate: from, toDate: to, days, reason });
+    let leave = await LeaveRequest.findOne({
+      userId: req.user._id,
+      status: { $in: ['Pending', 'Approved'] },
+      fromDate: { $lte: to },
+      toDate: { $gte: from }
+    });
+    if (!leave) {
+      leave = await LeaveRequest.create({ userId: req.user._id, type: leaveType, fromDate: from, toDate: to, days, reason });
+    }
     linkedLeaveRequestId = leave._id;
   }
 

@@ -14,14 +14,16 @@ import {
 
 const dateKeyOf = (d) => new Date(d).toISOString().slice(0, 10); // 'YYYY-MM-DD'
 
-/** Parse YYYY-MM-DD (or ISO) as UTC calendar-day start/end — avoids TZ drift. */
+/** Parse YYYY-MM-DD (or ISO / Date) as UTC calendar-day start/end — avoids TZ drift. */
 const utcDayStart = (value) => {
-  const m = String(value || '').match(/(\d{4})-(\d{2})-(\d{2})/);
+  const str = value instanceof Date ? value.toISOString() : String(value || '');
+  const m = str.match(/(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return new Date(value);
   return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 0, 0, 0, 0));
 };
 const utcDayEnd = (value) => {
-  const m = String(value || '').match(/(\d{4})-(\d{2})-(\d{2})/);
+  const str = value instanceof Date ? value.toISOString() : String(value || '');
+  const m = str.match(/(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return new Date(value);
   return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 23, 59, 59, 999));
 };
@@ -119,8 +121,33 @@ export const punchOut = asyncHandler(async (req, res) => {
 
 /** GET /api/attendance/today — the caller's own punch state for today (or null). */
 export const getTodayAttendance = asyncHandler(async (req, res) => {
-  const record = await Attendance.findOne({ userId: req.user._id, dateKey: dateKeyOf(new Date()) });
-  res.status(200).json({ success: true, record: record || null });
+  const now = new Date();
+  const dateKey = dateKeyOf(now);
+  const todayStart = utcDayStart(dateKey);
+  const todayEnd = utcDayEnd(dateKey);
+
+  const [record, activeLeave] = await Promise.all([
+    Attendance.findOne({ userId: req.user._id, dateKey }),
+    LeaveRequest.findOne({
+      userId: req.user._id,
+      status: 'Approved',
+      fromDate: { $lte: todayEnd },
+      toDate: { $gte: todayStart }
+    })
+  ]);
+
+  let resultRecord = record ? record.toObject() : null;
+  if (!resultRecord && activeLeave) {
+    resultRecord = {
+      dateKey,
+      status: 'Leave'
+    };
+  }
+  if (resultRecord) {
+    resultRecord.activeLeave = activeLeave || null;
+  }
+
+  res.status(200).json({ success: true, record: resultRecord, activeLeave: activeLeave || null });
 });
 
 /** POST /api/attendance — HR marks/edits attendance for an employee. */
@@ -432,11 +459,23 @@ export const applyLeave = asyncHandler(async (req, res) => {
   // Store as UTC calendar days so list filters match date-picker values in any TZ.
   const from = utcDayStart(fromDate);
   const to = utcDayStart(toDate);
+  const toEnd = utcDayEnd(toDate);
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
     throw new ApiError(400, 'fromDate and toDate must be valid dates');
   }
   if (to < from) throw new ApiError(400, 'toDate cannot be before fromDate');
   const computedDays = days || (Math.round((to - from) / 86400000) + 1);
+
+  // Prevent overlapping active (Pending or Approved) leave applications
+  const overlap = await LeaveRequest.findOne({
+    userId: req.user._id,
+    status: { $in: ['Pending', 'Approved'] },
+    fromDate: { $lte: toEnd },
+    toDate: { $gte: from }
+  });
+  if (overlap) {
+    throw new ApiError(400, `You already have a ${overlap.status.toLowerCase()} leave request covering this date.`);
+  }
 
   const leave = await LeaveRequest.create({
     userId: req.user._id, type, fromDate: from, toDate: to, days: computedDays, reason
@@ -485,18 +524,48 @@ export const decideLeave = asyncHandler(async (req, res) => {
   leave.decidedAt = new Date();
   leave.decisionNote = note;
   await leave.save();
+
+  if (status === 'Approved') {
+    const cur = new Date(leave.fromDate);
+    const end = new Date(leave.toDate);
+    while (cur <= end) {
+      const dKey = dateKeyOf(cur);
+      await Attendance.findOneAndUpdate(
+        { userId: leave.userId, dateKey: dKey, punchInAt: null },
+        { $set: { date: new Date(cur), status: 'Leave', notes: `Approved ${leave.type} leave` }, $setOnInsert: { userId: leave.userId, dateKey: dKey } },
+        { upsert: true, setDefaultsOnInsert: true }
+      );
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+  }
+
   res.status(200).json({ success: true, message: `Leave ${status.toLowerCase()}`, leave });
 });
 
-/** PATCH /api/leaves/:id/cancel — employee cancels their own pending leave. */
+/** PATCH /api/leaves/:id/cancel — employee cancels their own leave. */
 export const cancelLeave = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid leave id');
   const leave = await LeaveRequest.findById(req.params.id);
   if (!leave) throw new ApiError(404, 'Leave request not found');
   if (String(leave.userId) !== String(req.user._id)) throw new ApiError(403, 'You can only cancel your own leave');
-  if (leave.status !== 'Pending') throw new ApiError(400, 'Only pending leave can be cancelled');
+  if (!['Pending', 'Approved'].includes(leave.status)) {
+    throw new ApiError(400, 'Only pending or approved leave can be cancelled');
+  }
+
+  const prevStatus = leave.status;
   leave.status = 'Cancelled';
   await leave.save();
+
+  if (prevStatus === 'Approved') {
+    const cur = new Date(leave.fromDate);
+    const end = new Date(leave.toDate);
+    while (cur <= end) {
+      const dKey = dateKeyOf(cur);
+      await Attendance.deleteOne({ userId: leave.userId, dateKey: dKey, status: 'Leave', punchInAt: null });
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+  }
+
   res.status(200).json({ success: true, message: 'Leave cancelled', leave });
 });
 

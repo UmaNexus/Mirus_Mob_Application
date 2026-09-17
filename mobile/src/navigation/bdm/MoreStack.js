@@ -8,6 +8,7 @@ import StockistsScreen from '../../screens/bdm/StockistsScreen';
 import SecondarySalesScreen from '../../screens/bdm/SecondarySalesScreen';
 import CalendarScreen from '../../screens/bdm/CalendarScreen';
 import AlertsScreen from '../../screens/bdm/AlertsScreen';
+import ApplyLeaveScreen from '../../screens/bdm/ApplyLeaveScreen';
 import { colors } from '../../theme';
 
 const Stack = createNativeStackNavigator();
@@ -23,6 +24,7 @@ export default function MoreStack() {
       <Stack.Screen name="SecondarySales" component={SecondarySalesScreen} options={{ title: 'Secondary Sales' }} />
       <Stack.Screen name="Calendar" component={CalendarScreen} options={{ title: 'Status Calendar' }} />
       <Stack.Screen name="Alerts" component={AlertsScreen} options={{ title: 'Alerts' }} />
+      <Stack.Screen name="ApplyLeave" component={ApplyLeaveScreen} options={{ title: 'Apply Leave' }} />
     </Stack.Navigator>
   );
 }

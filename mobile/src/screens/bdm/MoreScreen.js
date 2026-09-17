@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Receipt, ListChecks, Store, ChartNoAxesCombined, CalendarDays, Bell, LogOut } from 'lucide-react-native';
+import { Receipt, ListChecks, Store, ChartNoAxesCombined, CalendarDays, Bell, LogOut, Palmtree } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { displayName } from '../../navigation/roleHelpers';
 import Card from '../../components/Card';
@@ -14,7 +14,8 @@ const ITEMS = [
   { icon: Store, label: 'Stockists', screen: 'Stockists' },
   { icon: ChartNoAxesCombined, label: 'Secondary Sales', screen: 'SecondarySales' },
   { icon: CalendarDays, label: 'Calendar', screen: 'Calendar' },
-  { icon: Bell, label: 'Alerts', screen: 'Alerts' }
+  { icon: Bell, label: 'Alerts', screen: 'Alerts' },
+  { icon: Palmtree, label: 'Apply Leave', screen: 'ApplyLeave' }
 ];
 
 export default function MoreScreen({ navigation }) {

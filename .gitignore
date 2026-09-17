@@ -18,6 +18,8 @@ server/uploads/
 
 # Docker bind-mount data (survives rebuilds; not in git)
 data/
+docker-compose.override.yml
+docker-compose.db.yml
 
 # Logs
 *.log

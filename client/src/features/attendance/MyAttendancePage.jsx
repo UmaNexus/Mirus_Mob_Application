@@ -12,7 +12,7 @@ import StatusBadge from '../../components/ui/StatusBadge.jsx';
 import FormDialog from '../../components/ui/FormDialog.jsx';
 import Spinner from '../../components/ui/Spinner.jsx';
 import useAsync from '../../hooks/useAsync.js';
-import { markMyAttendance, myAttendance, applyLeave, myLeaves } from '../../api/attendance.js';
+import { markMyAttendance, myAttendance, applyLeave, myLeaves, cancelLeave } from '../../api/attendance.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 import {
   toDateKey, daysOfMonth, daysOfWeek, monthLabel, shortDay,
@@ -81,6 +81,21 @@ export default function MyAttendancePage() {
       leaves.reload();
     } catch (err) { dispatch(notifyError(err.uiMessage)); }
     finally { setSaving(false); }
+  };
+
+  const [cancellingId, setCancellingId] = useState(null);
+  const onCancelLeave = async (id) => {
+    if (!window.confirm('Are you sure you want to cancel this leave request?')) return;
+    setCancellingId(id);
+    try {
+      await cancelLeave(id);
+      dispatch(notifySuccess('Leave request cancelled.'));
+      leaves.reload();
+    } catch (err) {
+      dispatch(notifyError(err.uiMessage || 'Failed to cancel leave'));
+    } finally {
+      setCancellingId(null);
+    }
   };
 
   const weekStart = startOfWeekMonday(new Date(weekAnchor));
@@ -175,6 +190,7 @@ export default function MyAttendancePage() {
               <th className="pb-2">To</th>
               <th className="pb-2">Days</th>
               <th className="pb-2">Status</th>
+              <th className="pb-2 text-right">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -185,9 +201,23 @@ export default function MyAttendancePage() {
                 <td className="py-2">{fmt(l.toDate)}</td>
                 <td className="py-2">{l.days}</td>
                 <td className="py-2"><StatusBadge status={l.status} /></td>
+                <td className="py-2 text-right">
+                  {(l.status === 'Pending' || l.status === 'Approved') ? (
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-danger hover:underline disabled:opacity-50"
+                      disabled={cancellingId === l._id}
+                      onClick={() => onCancelLeave(l._id)}
+                    >
+                      {cancellingId === l._id ? 'Cancelling…' : 'Cancel'}
+                    </button>
+                  ) : (
+                    <span className="text-xs text-muted">—</span>
+                  )}
+                </td>
               </tr>
             ))}
-            {!filteredLeaves.length && <tr><td colSpan={5} className="py-6 text-center text-muted">No leave requests.</td></tr>}
+            {!filteredLeaves.length && <tr><td colSpan={6} className="py-6 text-center text-muted">No leave requests.</td></tr>}
           </tbody>
         </table>
       </CardBody></Card>
