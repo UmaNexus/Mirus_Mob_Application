@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, Text, StyleSheet } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Plus } from 'lucide-react-native';
+import { Plus, ArrowLeft } from 'lucide-react-native';
 import MoreScreen from '../../screens/bdm/MoreScreen';
 import ExpensesScreen from '../../screens/bdm/ExpensesScreen';
 import AddExpenseScreen from '../../screens/bdm/AddExpenseScreen';
@@ -24,6 +24,24 @@ export default function MoreStack() {
         component={ExpensesScreen}
         options={({ navigation }) => ({
           title: 'Expenses',
+          headerBackVisible: false,
+          headerLeft: () => (
+            <Pressable
+              onPress={() => {
+                if (navigation.canGoBack()) {
+                  navigation.goBack();
+                } else {
+                  navigation.navigate('MoreMenu');
+                }
+              }}
+              style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Back to More"
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <ArrowLeft size={22} color={colors.white} />
+            </Pressable>
+          ),
           headerRight: () => (
             <Pressable
               onPress={() => navigation.navigate('AddExpense')}
@@ -50,6 +68,15 @@ export default function MoreStack() {
 }
 
 const styles = StyleSheet.create({
+  backBtn: {
+    paddingRight: 12,
+    paddingVertical: 4,
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  backBtnPressed: {
+    opacity: 0.7
+  },
   addBtn: {
     flexDirection: 'row',
     alignItems: 'center',

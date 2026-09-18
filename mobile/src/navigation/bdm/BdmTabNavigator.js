@@ -1,5 +1,6 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { CommonActions } from '@react-navigation/native';
 import { House, ClipboardList, CalendarDays, Stethoscope, MoreHorizontal } from 'lucide-react-native';
 import HomeStack from './HomeStack';
 import DcrStack from './DcrStack';
@@ -34,8 +35,26 @@ export default function BdmTabNavigator() {
         component={MoreStack}
         options={{ title: 'More' }}
         listeners={({ navigation }) => ({
-          tabPress: () => {
-            navigation.navigate('MoreTab', { screen: 'MoreMenu' });
+          tabPress: (e) => {
+            const state = navigation.getState();
+            const currentRoute = state?.routes?.[state?.index];
+            const isAlreadyOnMore = currentRoute?.name === 'MoreTab';
+            const moreRoute = isAlreadyOnMore ? currentRoute : state?.routes?.find((r) => r.name === 'MoreTab');
+
+            if (moreRoute?.state?.key) {
+              if (isAlreadyOnMore) {
+                e.preventDefault();
+              }
+              navigation.dispatch({
+                ...CommonActions.reset({
+                  index: 0,
+                  routes: [{ name: 'MoreMenu' }]
+                }),
+                target: moreRoute.state.key
+              });
+            } else {
+              navigation.navigate('MoreTab', { screen: 'MoreMenu' });
+            }
           }
         })}
       />

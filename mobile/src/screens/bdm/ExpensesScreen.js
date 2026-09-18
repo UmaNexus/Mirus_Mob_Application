@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, ScrollView, Pressable, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Receipt, RotateCcw, CalendarDays } from 'lucide-react-native';
@@ -32,28 +32,6 @@ export default function ExpensesScreen({ navigation }) {
 
   const expenses = useAsync(expensesApi.listMine, []);
   useRefreshOnFocus(expenses.reload);
-
-  // Return to More section when clicking More tab in the bottom navbar while on Expenses
-  useEffect(() => {
-    const parent = navigation.getParent?.();
-    if (!parent) return;
-
-    const unsubscribe = parent.addListener('tabPress', (e) => {
-      const parentState = parent.getState?.();
-      const targetRoute = parentState?.routes?.find((r) => r.key === e.target);
-      const isMoreTab = targetRoute ? targetRoute.name === 'MoreTab' : !e.target || e.target.startsWith('MoreTab');
-
-      if (isMoreTab && navigation.isFocused()) {
-        if (typeof navigation.popToTop === 'function') {
-          navigation.popToTop();
-        } else {
-          navigation.navigate('MoreMenu');
-        }
-      }
-    });
-
-    return unsubscribe;
-  }, [navigation]);
 
   const isFiltered = category !== 'all' || Boolean(fromDate) || Boolean(toDate);
 
