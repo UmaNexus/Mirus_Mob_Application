@@ -1,72 +1,333 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable, Platform, StyleSheet } from 'react-native';
-import { CalendarDays } from 'lucide-react-native';
-import { colors, radii, spacing, typography, iconSizes } from '../theme';
+import React, { useMemo, useState } from 'react';
+import { View, Text, TextInput, Pressable, Modal, StyleSheet } from 'react-native';
+import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { colors, radii, spacing, typography } from '../theme';
 
-// @react-native-community/datetimepicker has no web implementation (same
-// class of gap as expo-secure-store, see tokenStorage.js) — required lazily,
-// guarded by platform, so a web bundle never touches the native-only module.
-// eslint-disable-next-line global-require
-const DateTimePicker = Platform.OS === 'web' ? null : require('@react-native-community/datetimepicker').default;
+const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
 
-const toDateOnly = (d) => new Date(d).toISOString().slice(0, 10);
+const pad2 = (n) => String(n).padStart(2, '0');
+const toDateKey = (y, m, d) => `${y}-${pad2(m + 1)}-${pad2(d)}`;
 
 /**
- * Labeled date picker. `value`/`onChange` use plain 'YYYY-MM-DD' strings —
- * every API in this app takes/returns dates that way, so screens never
- * juggle Date objects themselves. Falls back to a plain text field on web
- * (dev-preview only; real usage is iOS/Android where the native picker runs).
+ * Universal DateField with integrated calendar picker button & modal.
+ * Works seamlessly across Web, iOS, and Android without native binary dependencies.
+ * Provides a visible Calendar Button that opens an interactive calendar view for date selection.
  */
-export default function DateField({ label, value, onChange, placeholder = 'Select date' }) {
+export default function DateField({ label, value, onChange, placeholder = 'YYYY-MM-DD', disabled = false }) {
   const [open, setOpen] = useState(false);
+  const [viewYear, setViewYear] = useState(new Date().getFullYear());
+  const [viewMonth, setViewMonth] = useState(new Date().getMonth());
 
-  if (Platform.OS === 'web') {
-    return (
-      <View style={styles.group}>
-        {label ? <Text style={typography.label}>{label}</Text> : null}
-        <TextInput
-          style={styles.field}
-          value={value || ''}
-          onChangeText={onChange}
-          placeholder={`${placeholder} (YYYY-MM-DD)`}
-          placeholderTextColor={colors.muted}
-        />
-      </View>
-    );
-  }
-
-  const handleChange = (event, selected) => {
-    setOpen(Platform.OS === 'ios'); // iOS picker stays open (inline), Android closes itself
-    if (event.type === 'dismissed' || !selected) return;
-    onChange(toDateOnly(selected));
+  const openPicker = () => {
+    if (disabled) return;
+    const initial = value && /^\d{4}-\d{2}-\d{2}$/.test(value)
+      ? new Date(`${value}T00:00:00`)
+      : new Date();
+    if (!Number.isNaN(initial.getTime())) {
+      setViewYear(initial.getFullYear());
+      setViewMonth(initial.getMonth());
+    } else {
+      const now = new Date();
+      setViewYear(now.getFullYear());
+      setViewMonth(now.getMonth());
+    }
+    setOpen(true);
   };
+
+  const closePicker = () => setOpen(false);
+
+  const prevMonth = () => {
+    if (viewMonth === 0) {
+      setViewMonth(11);
+      setViewYear((y) => y - 1);
+    } else {
+      setViewMonth((m) => m - 1);
+    }
+  };
+
+  const nextMonth = () => {
+    if (viewMonth === 11) {
+      setViewMonth(0);
+      setViewYear((y) => y + 1);
+    } else {
+      setViewMonth((m) => m + 1);
+    }
+  };
+
+  const handleSelectDay = (day) => {
+    const selected = toDateKey(viewYear, viewMonth, day);
+    onChange(selected);
+    setOpen(false);
+  };
+
+  const handleSelectToday = () => {
+    const now = new Date();
+    const todayStr = toDateKey(now.getFullYear(), now.getMonth(), now.getDate());
+    onChange(todayStr);
+    setOpen(false);
+  };
+
+  // Build calendar matrix
+  const { blanks, days } = useMemo(() => {
+    const firstDay = new Date(viewYear, viewMonth, 1).getDay(); // 0 = Sun
+    const totalDays = new Date(viewYear, viewMonth + 1, 0).getDate();
+    return {
+      blanks: Array.from({ length: firstDay }, (_, i) => i),
+      days: Array.from({ length: totalDays }, (_, i) => i + 1)
+    };
+  }, [viewYear, viewMonth]);
+
+  const now = new Date();
+  const todayKey = toDateKey(now.getFullYear(), now.getMonth(), now.getDate());
 
   return (
     <View style={styles.group}>
       {label ? <Text style={typography.label}>{label}</Text> : null}
-      <Pressable style={styles.field} onPress={() => setOpen(true)} accessibilityRole="button">
-        <Text style={value ? styles.valueText : styles.placeholderText}>{value || placeholder}</Text>
-        <CalendarDays size={iconSizes.card} color={colors.muted} />
-      </Pressable>
-      {open && (
-        <DateTimePicker
-          value={value ? new Date(`${value}T00:00:00`) : new Date()}
-          mode="date"
-          display={Platform.OS === 'ios' ? 'inline' : 'default'}
-          onChange={handleChange}
+
+      <View style={[styles.fieldContainer, disabled && styles.disabled]}>
+        <TextInput
+          style={styles.input}
+          value={value || ''}
+          onChangeText={onChange}
+          placeholder={placeholder}
+          placeholderTextColor={colors.muted}
+          editable={!disabled}
         />
-      )}
+        <Pressable
+          style={({ pressed }) => [
+            styles.calendarBtn,
+            pressed && styles.calendarBtnPressed
+          ]}
+          onPress={openPicker}
+          disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Open calendar"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <CalendarDays size={18} color={colors.primary} />
+        </Pressable>
+      </View>
+
+      <Modal visible={open} transparent animationType="fade" onRequestClose={closePicker}>
+        <Pressable style={styles.backdrop} onPress={closePicker}>
+          <Pressable style={styles.modalCard} onPress={(e) => e?.stopPropagation?.()}>
+            {/* Header */}
+            <View style={styles.calendarHeader}>
+              <Pressable style={styles.navBtn} onPress={prevMonth} hitSlop={8}>
+                <ChevronLeft size={20} color={colors.ink} />
+              </Pressable>
+              <Text style={styles.calendarMonthTitle}>
+                {MONTHS[viewMonth]} {viewYear}
+              </Text>
+              <Pressable style={styles.navBtn} onPress={nextMonth} hitSlop={8}>
+                <ChevronRight size={20} color={colors.ink} />
+              </Pressable>
+            </View>
+
+            {/* Weekdays Row */}
+            <View style={styles.weekdaysRow}>
+              {WEEKDAYS.map((w, idx) => (
+                <View key={idx} style={styles.weekdayCell}>
+                  <Text style={styles.weekdayText}>{w}</Text>
+                </View>
+              ))}
+            </View>
+
+            {/* Days Grid */}
+            <View style={styles.daysGrid}>
+              {blanks.map((b) => (
+                <View key={`blank-${b}`} style={styles.dayCell} />
+              ))}
+              {days.map((day) => {
+                const dateKey = toDateKey(viewYear, viewMonth, day);
+                const isSelected = dateKey === value;
+                const isToday = dateKey === todayKey;
+
+                return (
+                  <View key={`day-${day}`} style={styles.dayCell}>
+                    <Pressable
+                      style={[
+                        styles.dayBtn,
+                        isSelected && styles.dayBtnSelected,
+                        isToday && !isSelected && styles.dayBtnToday
+                      ]}
+                      onPress={() => handleSelectDay(day)}
+                    >
+                      <Text
+                        style={[
+                          styles.dayText,
+                          isSelected && styles.dayTextSelected,
+                          isToday && !isSelected && styles.dayTextToday
+                        ]}
+                      >
+                        {day}
+                      </Text>
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* Footer */}
+            <View style={styles.calendarFooter}>
+              <Pressable style={styles.footerActionBtn} onPress={handleSelectToday}>
+                <Text style={styles.todayBtnText}>Today</Text>
+              </Pressable>
+              <Pressable style={styles.footerActionBtn} onPress={closePicker}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   group: { gap: spacing.xs },
-  field: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    borderWidth: 1, borderColor: colors.line, borderRadius: radii.md,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.md, backgroundColor: colors.surface, minHeight: 48
+  fieldContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
+    minHeight: 48,
+    paddingLeft: spacing.md,
+    paddingRight: spacing.xs
   },
-  valueText: { fontSize: 14, color: colors.ink },
-  placeholderText: { fontSize: 14, color: colors.muted }
+  disabled: { opacity: 0.5 },
+  input: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.ink,
+    paddingVertical: spacing.sm
+  },
+  calendarBtn: {
+    padding: spacing.sm,
+    borderRadius: radii.sm,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: spacing.xs
+  },
+  calendarBtnPressed: {
+    opacity: 0.7
+  },
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: colors.card,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8
+  },
+  calendarHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing.xs,
+    marginBottom: spacing.xs
+  },
+  navBtn: {
+    padding: spacing.xs,
+    borderRadius: radii.sm
+  },
+  calendarMonthTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.ink
+  },
+  weekdaysRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+    paddingBottom: spacing.xs,
+    marginBottom: spacing.xs
+  },
+  weekdayCell: {
+    flex: 1,
+    alignItems: 'center'
+  },
+  weekdayText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.muted
+  },
+  daysGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap'
+  },
+  dayCell: {
+    width: `${100 / 7}%`,
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 2
+  },
+  dayBtn: {
+    width: '88%',
+    height: '88%',
+    borderRadius: radii.pill,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  dayBtnSelected: {
+    backgroundColor: colors.primary
+  },
+  dayBtnToday: {
+    borderWidth: 1.5,
+    borderColor: colors.primary
+  },
+  dayText: {
+    fontSize: 13,
+    color: colors.ink
+  },
+  dayTextSelected: {
+    color: colors.white,
+    fontWeight: '700'
+  },
+  dayTextToday: {
+    color: colors.primary,
+    fontWeight: '700'
+  },
+  calendarFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: spacing.md,
+    marginTop: spacing.sm,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.line
+  },
+  footerActionBtn: {
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm
+  },
+  todayBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary
+  },
+  cancelBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.muted
+  }
 });

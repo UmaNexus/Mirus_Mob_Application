@@ -1,5 +1,7 @@
 import React from 'react';
+import { Pressable, Text, StyleSheet } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { Plus } from 'lucide-react-native';
 import MoreScreen from '../../screens/bdm/MoreScreen';
 import ExpensesScreen from '../../screens/bdm/ExpensesScreen';
 import AddExpenseScreen from '../../screens/bdm/AddExpenseScreen';
@@ -17,7 +19,25 @@ export default function MoreStack() {
   return (
     <Stack.Navigator screenOptions={{ headerStyle: { backgroundColor: colors.ink }, headerTintColor: colors.white }}>
       <Stack.Screen name="MoreMenu" component={MoreScreen} options={{ title: 'More' }} />
-      <Stack.Screen name="Expenses" component={ExpensesScreen} options={{ title: 'Expenses' }} />
+      <Stack.Screen
+        name="Expenses"
+        component={ExpensesScreen}
+        options={({ navigation }) => ({
+          title: 'Expenses',
+          headerRight: () => (
+            <Pressable
+              onPress={() => navigation.navigate('AddExpense')}
+              style={({ pressed }) => [styles.addBtn, pressed && styles.addBtnPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Add"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Plus size={18} color={colors.primary} />
+              <Text style={styles.addBtnText}>Add</Text>
+            </Pressable>
+          )
+        })}
+      />
       <Stack.Screen name="AddExpense" component={AddExpenseScreen} options={{ title: 'Add Expense' }} />
       <Stack.Screen name="WorkType" component={WorkTypeScreen} options={{ title: 'Work Type' }} />
       <Stack.Screen name="Stockists" component={StockistsScreen} options={{ title: 'Stockists' }} />
@@ -28,3 +48,21 @@ export default function MoreStack() {
     </Stack.Navigator>
   );
 }
+
+const styles = StyleSheet.create({
+  addBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4
+  },
+  addBtnPressed: {
+    opacity: 0.7
+  },
+  addBtnText: {
+    color: colors.primary,
+    fontSize: 15,
+    fontWeight: '700'
+  }
+});

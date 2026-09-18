@@ -52,6 +52,64 @@ test('a BDM can submit an expense; amount is stored in integer paisa', async () 
   assert.equal(res.body.expense.status, 'pending');
 });
 
+// ---------- List + category and date range filtering ----------
+
+test('a BDM can filter expenses by category (Travel, Food, Stay, Misc)', async () => {
+  const { bdmAgent } = await setupAsmBdm();
+  await bdmAgent.post('/api/expenses').send({ category: 'Travel', date: '2026-08-10', amount: 300 });
+  await bdmAgent.post('/api/expenses').send({ category: 'Food', date: '2026-08-11', amount: 150 });
+  await bdmAgent.post('/api/expenses').send({ category: 'Stay', date: '2026-08-12', amount: 1200 });
+  await bdmAgent.post('/api/expenses').send({ category: 'Misc', date: '2026-08-13', amount: 80 });
+
+  const allRes = await bdmAgent.get('/api/expenses');
+  assert.equal(allRes.status, 200);
+  assert.equal(allRes.body.data.length, 4);
+
+  const travelRes = await bdmAgent.get('/api/expenses?category=Travel');
+  assert.equal(travelRes.status, 200);
+  assert.equal(travelRes.body.data.length, 1);
+  assert.equal(travelRes.body.data[0].category, 'Travel');
+
+  const foodRes = await bdmAgent.get('/api/expenses?category=Food');
+  assert.equal(foodRes.status, 200);
+  assert.equal(foodRes.body.data.length, 1);
+  assert.equal(foodRes.body.data[0].category, 'Food');
+
+  const stayRes = await bdmAgent.get('/api/expenses?category=Stay');
+  assert.equal(stayRes.status, 200);
+  assert.equal(stayRes.body.data.length, 1);
+  assert.equal(stayRes.body.data[0].category, 'Stay');
+
+  const miscRes = await bdmAgent.get('/api/expenses?category=Misc');
+  assert.equal(miscRes.status, 200);
+  assert.equal(miscRes.body.data.length, 1);
+  assert.equal(miscRes.body.data[0].category, 'Misc');
+});
+
+test('a BDM can filter expenses by date range (from and to)', async () => {
+  const { bdmAgent } = await setupAsmBdm();
+  await bdmAgent.post('/api/expenses').send({ category: 'Travel', date: '2026-08-01', amount: 100 });
+  await bdmAgent.post('/api/expenses').send({ category: 'Food', date: '2026-08-15', amount: 200 });
+  await bdmAgent.post('/api/expenses').send({ category: 'Stay', date: '2026-08-30', amount: 300 });
+
+  // From and to covering the middle item
+  const midRes = await bdmAgent.get('/api/expenses?from=2026-08-10&to=2026-08-20');
+  assert.equal(midRes.status, 200);
+  assert.equal(midRes.body.data.length, 1);
+  assert.equal(midRes.body.data[0].category, 'Food');
+
+  // Inclusive end of day check
+  const endRes = await bdmAgent.get('/api/expenses?from=2026-08-15&to=2026-08-30');
+  assert.equal(endRes.status, 200);
+  assert.equal(endRes.body.data.length, 2);
+
+  // Combined category and date range
+  const comboRes = await bdmAgent.get('/api/expenses?category=Stay&from=2026-08-15&to=2026-08-30');
+  assert.equal(comboRes.status, 200);
+  assert.equal(comboRes.body.data.length, 1);
+  assert.equal(comboRes.body.data[0].category, 'Stay');
+});
+
 // ---------- Receipt upload + authorized access ----------
 
 test('a BDM can attach a receipt and retrieve it themselves', async () => {

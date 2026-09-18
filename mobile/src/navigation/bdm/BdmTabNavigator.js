@@ -29,8 +29,16 @@ export default function BdmTabNavigator() {
       <Tab.Screen name="HomeTab" component={HomeStack} options={{ title: 'Home' }} />
       <Tab.Screen name="DcrTab" component={DcrStack} options={{ title: 'DCR' }} />
       <Tab.Screen name="MtpTab" component={MtpStack} options={{ title: 'MTP' }} />
-      <Tab.Screen name="DoctorsTab" component={DoctorsStack} options={{ title: 'Doctors' }} />
-      <Tab.Screen name="MoreTab" component={MoreStack} options={{ title: 'More' }} />
+      <Tab.Screen
+        name="MoreTab"
+        component={MoreStack}
+        options={{ title: 'More' }}
+        listeners={({ navigation }) => ({
+          tabPress: () => {
+            navigation.navigate('MoreTab', { screen: 'MoreMenu' });
+          }
+        })}
+      />
     </Tab.Navigator>
   );
 }

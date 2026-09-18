@@ -44,10 +44,19 @@ export const createExpense = asyncHandler(async (req, res) => {
 export const listMyExpenses = asyncHandler(async (req, res) => {
   const filter = { userId: req.user._id };
   if (req.query.status) filter.status = req.query.status;
+  if (req.query.category) filter.category = req.query.category;
   if (req.query.from || req.query.to) {
     filter.date = {};
-    if (req.query.from) filter.date.$gte = new Date(req.query.from);
-    if (req.query.to) filter.date.$lte = new Date(req.query.to);
+    if (req.query.from) {
+      const fromStr = req.query.from.length === 10 ? `${req.query.from}T00:00:00.000Z` : req.query.from;
+      const fromDate = new Date(fromStr);
+      if (!isNaN(fromDate.getTime())) filter.date.$gte = fromDate;
+    }
+    if (req.query.to) {
+      const toStr = req.query.to.length === 10 ? `${req.query.to}T23:59:59.999Z` : req.query.to;
+      const toDate = new Date(toStr);
+      if (!isNaN(toDate.getTime())) filter.date.$lte = toDate;
+    }
   }
   const expenses = await Expense.find(filter).sort({ date: -1 });
   res.status(200).json({ success: true, data: expenses });
@@ -64,6 +73,20 @@ export const listTeamExpenses = asyncHandler(async (req, res) => {
     filter.userId = req.query.userId;
   }
   if (req.query.status) filter.status = req.query.status;
+  if (req.query.category) filter.category = req.query.category;
+  if (req.query.from || req.query.to) {
+    filter.date = {};
+    if (req.query.from) {
+      const fromStr = req.query.from.length === 10 ? `${req.query.from}T00:00:00.000Z` : req.query.from;
+      const fromDate = new Date(fromStr);
+      if (!isNaN(fromDate.getTime())) filter.date.$gte = fromDate;
+    }
+    if (req.query.to) {
+      const toStr = req.query.to.length === 10 ? `${req.query.to}T23:59:59.999Z` : req.query.to;
+      const toDate = new Date(toStr);
+      if (!isNaN(toDate.getTime())) filter.date.$lte = toDate;
+    }
+  }
 
   const expenses = await Expense.find(filter)
     .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce')
