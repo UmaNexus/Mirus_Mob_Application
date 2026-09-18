@@ -23,3 +23,10 @@ export const create = ({ category, date, amount, stationType, from, to, modeOfTr
 };
 
 export const receiptUrl = (expenseId) => `${api.defaults.baseURL}/expenses/${expenseId}/receipt`;
+
+// ---- Manager (ASM+) review — scoped server-side to the caller's reporting subtree ----
+
+export const listPending = () => api.get('/expenses/pending').then((res) => res.data.data);
+
+export const decide = (id, status, note) => api.patch(`/expenses/${id}/decision`, { status, note }).then((res) => res.data.expense);
+

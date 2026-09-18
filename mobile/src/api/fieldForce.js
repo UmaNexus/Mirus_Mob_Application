@@ -11,3 +11,7 @@ export const getTeam = () => api.get('/field-force/team').then((res) => res.data
 
 /** The caller's own eligible Joint Call / Manager Meeting participants: { managers, others }. */
 export const getJointCallParticipants = () => api.get('/field-force/joint-call-participants').then((res) => res.data.data);
+
+/** Live field-force monitor KPIs for managers (team size, today's DCRs, pending MTPs, pending expenses). */
+export const getMonitor = () => api.get('/field-force/monitor').then((res) => res.data.data);
+

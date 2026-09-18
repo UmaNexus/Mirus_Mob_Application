@@ -234,12 +234,85 @@ export const getMonitor = asyncHandler(async (req, res) => {
     teamMemberFilter = { _id: { $in: subtree } };
   }
 
-  const [teamSize, dcrToday, pendingMtp, pendingExpense] = await Promise.all([
+  const month = String(req.query.month || currentMonth());
+  const [year, monthNumber] = month.split('-').map(Number);
+  const workingDays = getWorkingDaysInMonth(year, monthNumber);
+  const today = todayKey();
+  const elapsedWorkingDays = workingDays.filter((d) => d <= today);
+  const targetWorkingDays = elapsedWorkingDays.length > 0 ? elapsedWorkingDays : workingDays;
+
+  const [
+    teamSize,
+    bdmCount,
+    bdmUsers,
+    dcrToday,
+    pendingMtp,
+    approvedMtp,
+    totalVisits,
+    pendingExpense,
+    approvedPlans
+  ] = await Promise.all([
     User.countDocuments(teamMemberFilter),
+    User.countDocuments({ ...teamMemberFilter, 'employeeDetails.fieldForce.tier': 'BDM' }),
+    User.find({ ...teamMemberFilter, 'employeeDetails.fieldForce.tier': 'BDM' }).select('_id').lean(),
     DailyCallReport.distinct('userId', { ...scopeFilter, dateKey: todayKey() }).then((ids) => ids.length),
-    MonthlyTourPlan.countDocuments({ ...scopeFilter, status: 'pending' }),
-    Expense.countDocuments({ ...scopeFilter, status: 'pending' })
+    MonthlyTourPlan.countDocuments({ ...scopeFilter, month, status: 'pending' }),
+    MonthlyTourPlan.countDocuments({ ...scopeFilter, month, status: 'approved' }),
+    DailyCallReport.countDocuments({ ...scopeFilter, dateKey: { $gte: `${month}-01`, $lte: `${month}-31` } }),
+    Expense.countDocuments({ ...scopeFilter, status: 'pending' }),
+    MonthlyTourPlan.find({ ...scopeFilter, month, status: 'approved' }).select('plannedVisits userId').lean()
   ]);
 
-  res.status(200).json({ success: true, data: { teamSize, dcrSubmittedTodayCount: dcrToday, pendingMtpCount: pendingMtp, pendingExpenseCount: pendingExpense } });
+  const bdmIds = bdmUsers.map((u) => u._id);
+
+  // DCR rate: % of working days on which BDMs submitted DCRs
+  let dcrRate = 0;
+  if (bdmIds.length > 0 && targetWorkingDays.length > 0) {
+    const submittedDays = await DailyCallReport.find({
+      userId: { $in: bdmIds },
+      dateKey: { $in: targetWorkingDays },
+      submittedAt: { $ne: null }
+    }).select('userId dateKey').lean();
+
+    const uniqueBdmDays = new Set(submittedDays.map((r) => `${r.userId}_${r.dateKey}`)).size;
+    const totalExpectedDays = bdmIds.length * targetWorkingDays.length;
+    dcrRate = totalExpectedDays > 0 ? Math.min(100, Math.round((uniqueBdmDays / totalExpectedDays) * 100)) : 0;
+  }
+
+  // MTP adherence: % of planned visits on approved MTPs that have DCR logs
+  let mtpAdherence = 0;
+  let totalPlannedVisits = 0;
+  approvedPlans.forEach((plan) => {
+    totalPlannedVisits += plan.plannedVisits?.length || 0;
+  });
+
+  if (totalPlannedVisits > 0) {
+    const matchingVisits = await DailyCallReport.countDocuments({
+      ...scopeFilter,
+      dateKey: { $gte: `${month}-01`, $lte: `${month}-31` },
+      type: { $ne: 'missed' }
+    });
+    mtpAdherence = Math.min(100, Math.round((matchingVisits / totalPlannedVisits) * 100));
+  } else if (approvedMtp > 0) {
+    mtpAdherence = 100;
+  }
+
+  const pendingMtpAll = pendingMtp > 0 ? pendingMtp : await MonthlyTourPlan.countDocuments({ ...scopeFilter, status: 'pending' });
+
+  res.status(200).json({
+    success: true,
+    data: {
+      teamSize,
+      bdmCount: bdmCount > 0 ? bdmCount : teamSize,
+      dcrSubmittedTodayCount: dcrToday,
+      pendingMtpCount: pendingMtpAll,
+      approvedMtpCount: approvedMtp,
+      totalVisits,
+      dcrRate,
+      mtpAdherence,
+      pendingExpenseCount: pendingExpense,
+      month
+    }
+  });
 });
+

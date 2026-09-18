@@ -6,7 +6,8 @@ import { resolveUserTier } from './roleHelpers';
 import LoadingScreen from '../screens/LoadingScreen';
 import LoginScreen from '../screens/LoginScreen';
 import BdmTabNavigator from './bdm/BdmTabNavigator';
-import ManagerStack from './manager/ManagerStack';
+import ManagerTabNavigator from './manager/ManagerTabNavigator';
+
 
 const Stack = createNativeStackNavigator();
 
@@ -32,7 +33,7 @@ export default function RootNavigator() {
           tier === 'BDM' ? (
             <Stack.Screen name="BdmApp" component={BdmTabNavigator} />
           ) : (
-            <Stack.Screen name="ManagerApp" component={ManagerStack} />
+            <Stack.Screen name="ManagerApp" component={ManagerTabNavigator} />
           )
         ) : (
           <Stack.Screen name="Login" component={LoginScreen} />
