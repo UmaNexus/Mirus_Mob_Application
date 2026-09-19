@@ -92,6 +92,15 @@ export const createDcr = asyncHandler(async (req, res) => {
     visitTime: visitTime ? new Date(visitTime) : new Date()
   });
   await dcr.populate('doctorId', DOCTOR_SELECT);
+  console.log('========== DCR CREATED ==========');
+  console.log('DCR ID:', dcr._id);
+  console.log('USER ID:', dcr.userId);
+  console.log('DATE KEY:', dcr.dateKey);
+  console.log('TYPE:', dcr.type);
+  console.log('STATUS:', dcr.status);
+  console.log('DOCTOR ID:', dcr.doctorId);
+  console.log('PRODUCTS:', dcr.productsDetailed);
+  console.log('================================');
 
   await logActivity({
     actor: req.user, action: `dcr.${type}`, entityType: 'DailyCallReport', entityId: dcr._id,
@@ -161,12 +170,26 @@ export const updateDcr = asyncHandler(async (req, res) => {
  */
 export const listMyDcr = asyncHandler(async (req, res) => {
   const filter = { userId: req.user._id };
+
   if (req.query.date) filter.dateKey = String(req.query.date);
   if (req.query.type) filter.type = req.query.type;
   if (req.query.status) filter.status = req.query.status;
 
-  const dcrs = await DailyCallReport.find(filter).populate('doctorId', DOCTOR_SELECT).sort({ visitTime: -1 });
-  res.status(200).json({ success: true, data: dcrs });
+  console.log('DCR FILTER:', filter);
+  console.log('REQUEST DATE:', req.query.date);
+  console.log('USER ID:', req.user._id);
+
+  const dcrs = await DailyCallReport.find(filter)
+    .populate('doctorId', DOCTOR_SELECT)
+    .sort({ visitTime: -1 });
+
+  console.log('TODAY DCR COUNT:', dcrs.length);
+  console.log('TODAY DCRs:', dcrs);
+
+  res.status(200).json({
+    success: true,
+    data: dcrs
+  });
 });
 
 const todayKey = () => dateKeyOf(new Date());

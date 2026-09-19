@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ClipboardList, CalendarDays, Receipt, ListChecks, AlertTriangle, Palmtree } from 'lucide-react-native';
@@ -7,6 +7,7 @@ import { useAsync } from '../../hooks/useAsync';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import * as attendanceApi from '../../api/attendance';
 import * as fieldForceApi from '../../api/fieldForce';
+import * as dcrApi from '../../api/dcr';
 import { displayName } from '../../navigation/roleHelpers';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
@@ -27,8 +28,16 @@ export default function BdmHomeScreen({ navigation }) {
 
   const today = useAsync(attendanceApi.getToday, []);
   const dashboard = useAsync(fieldForceApi.getDashboard, []);
+  const dcrToday = useAsync(
+  () => dcrApi.listMine({
+    date: new Date().toISOString().slice(0, 10)
+    }),
+    []
+  );
+  
   useRefreshOnFocus(today.reload);
   useRefreshOnFocus(dashboard.reload);
+  useRefreshOnFocus(dcrToday.reload);
 
   const handlePunch = async () => {
     setPunchError(null);
@@ -50,13 +59,26 @@ export default function BdmHomeScreen({ navigation }) {
   const activeLeave = today.data?.activeLeave;
   const isOnLeaveToday = Boolean(activeLeave || today.data?.status === 'Leave');
   const punchedIn = Boolean(today.data?.punchInAt && !today.data?.punchOutAt);
-  const refreshing = today.status === 'loading' && dashboard.status === 'loading';
+  const refreshing =
+  today.status === 'loading' &&
+  dashboard.status === 'loading' &&
+  dcrToday.status === 'loading';
+  const todaysPlan = (dcrToday.data || []).slice(0, 3);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
-        contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { today.reload(); dashboard.reload(); }} />}
+      contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              today.reload();
+              dashboard.reload();
+              dcrToday.reload();
+            }}
+          />
+        }
       >
         <Card style={styles.hero}>
           <Text style={styles.heroName}>{displayName(user)}</Text>
@@ -166,6 +188,73 @@ export default function BdmHomeScreen({ navigation }) {
           <QuickAction icon={Receipt} label="Expenses" onPress={() => navigation.navigate('MoreTab', { screen: 'Expenses' })} />
           <QuickAction icon={ListChecks} label="Work Type" onPress={() => navigation.navigate('MoreTab', { screen: 'WorkType' })} />
         </View>
+        {/* todaysPlan */}
+        <Text style={typography.label}>Today's plan</Text>
+
+        {dcrToday.status === 'loading' && <LoadingView />}
+
+        {dcrToday.status === 'error' && (
+          <ErrorBanner message={dcrToday.error} />
+        )}
+
+        {dcrToday.status === 'success' && (
+          <Card>
+            {todaysPlan.length === 0 ? (
+              <Text style={styles.emptyPlan}>
+                No calls logged today
+              </Text>
+            ) : (
+              todaysPlan.map((item, index) => {
+                const isActivity =
+                  item.type === 'camp' || item.type === 'meeting';
+
+                const title = isActivity
+                  ? item.activityName
+                  : item.doctorId?.name || 'Unknown doctor';
+
+                const subtitle = isActivity
+                  ? item.venue || item.type
+                  : [
+                      item.productsDetailed?.[0],
+                      item.doctorId?.speciality
+                    ]
+                      .filter(Boolean)
+                      .join(' · ') || 'No product noted';
+
+                return (
+                  <View
+                    key={item._id}
+                    style={[
+                      styles.planRow,
+                      index < todaysPlan.length - 1 && styles.planRowBorder
+                    ]}
+                  >
+                    <View style={styles.planInfo}>
+                      <Text style={styles.planTitle}>
+                        {title}
+                      </Text>
+
+                      <Text style={styles.planSubtitle}>
+                        {subtitle}
+                      </Text>
+                    </View>
+
+                    <StatusBadge
+                      label={item.status}
+                      tone={
+                        item.status === 'pending'
+                          ? 'warning'
+                          : item.status === 'completed'
+                            ? 'success'
+                            : 'danger'
+                      }
+                    />
+                  </View>
+                );
+              })
+            )}
+          </Card>
+        )}
 
         <Text style={typography.label}>Today</Text>
         {dashboard.status === 'loading' && <LoadingView />}
@@ -291,5 +380,40 @@ progressFill: {
   height: '100%',
   borderRadius: 4,
   backgroundColor: '#2563EB',
+},
+emptyPlan: {
+  fontSize: 13,
+  color: colors.muted,
+  textAlign: 'center',
+  paddingVertical: spacing.md
+},
+
+planRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  paddingVertical: spacing.md
+},
+
+planRowBorder: {
+  borderBottomWidth: 1,
+  borderBottomColor: colors.line
+},
+
+planInfo: {
+  flex: 1,
+  marginRight: spacing.sm
+},
+
+planTitle: {
+  fontSize: 15,
+  fontWeight: '700',
+  color: colors.ink
+},
+
+planSubtitle: {
+  fontSize: 12,
+  color: colors.muted,
+  marginTop: 3
 },
 });
