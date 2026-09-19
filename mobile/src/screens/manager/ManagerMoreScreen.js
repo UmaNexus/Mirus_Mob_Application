@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LogOut, ClipboardList, ChevronRight } from 'lucide-react-native';
+import { LogOut, ClipboardList, CalendarDays, ChevronRight } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { displayName, resolveUserTier } from '../../navigation/roleHelpers';
 import Card from '../../components/Card';
@@ -26,20 +26,27 @@ export default function ManagerMoreScreen({ navigation }) {
           </Text>
         </Card>
 
-        <Pressable onPress={() => navigation.navigate('DcrReview')} accessibilityRole="button">
-          <Card style={styles.navRow}>
-            <ClipboardList size={iconSizes.header} color={colors.primary} />
-            <View style={styles.navRowText}>
-              <Text style={styles.navRowTitle}>DCR Review</Text>
-              <Text style={styles.navRowSubtitle}>Review your team's submitted daily call reports</Text>
-            </View>
-            <ChevronRight size={iconSizes.header} color={colors.muted} />
-          </Card>
-        </Pressable>
+        <NavRow icon={ClipboardList} title="DCR Review" subtitle="Review your team's submitted daily call reports" onPress={() => navigation.navigate('DcrReview')} />
+        <NavRow icon={CalendarDays} title="Status Calendar" subtitle="Your holidays, leave, and attendance for the month" onPress={() => navigation.navigate('Calendar')} />
 
         <Button icon={LogOut} title="Sign out" variant="outline" onPress={signOut} />
       </View>
     </SafeAreaView>
+  );
+}
+
+function NavRow({ icon: Icon, title, subtitle, onPress }) {
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button">
+      <Card style={styles.navRow}>
+        <Icon size={iconSizes.header} color={colors.primary} />
+        <View style={styles.navRowText}>
+          <Text style={styles.navRowTitle}>{title}</Text>
+          <Text style={styles.navRowSubtitle}>{subtitle}</Text>
+        </View>
+        <ChevronRight size={iconSizes.header} color={colors.muted} />
+      </Card>
+    </Pressable>
   );
 }
 

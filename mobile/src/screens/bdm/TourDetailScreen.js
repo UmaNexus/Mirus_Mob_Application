@@ -5,6 +5,7 @@ import { Plus, Save, Send, Undo2, Pencil, Trash2 } from 'lucide-react-native';
 import { useAsync } from '../../hooks/useAsync';
 import * as mtpApi from '../../api/mtp';
 import * as doctorsApi from '../../api/doctors';
+import * as holidaysApi from '../../api/holidays';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
 import FormField from '../../components/FormField';
@@ -15,7 +16,7 @@ import SuccessBanner from '../../components/SuccessBanner';
 import { colors, radii, spacing, typography, iconSizes } from '../../theme';
 import {
   monthKey, daysInMonth, firstWeekdayMonFirst, monthLabel, shortDate, rangeLabel,
-  datesBetween, blocksFromVisits, flattenBlocks
+  datesBetween, blocksFromVisits, flattenBlocks, isWeekend
 } from '../../utils/mtpBlocks';
 
 const EDITABLE_STATUSES = ['draft', 'rejected', 'withdrawn'];
@@ -27,6 +28,11 @@ const BLOCK_PALETTE = [
   { soft: colors.warningSoft, solid: colors.warning },
   { soft: colors.dangerSoft, solid: colors.danger }
 ];
+
+// HRMS holidays are shown in red everywhere — reusing the shared danger
+// tokens rather than a separate holiday color.
+const HOLIDAY_COLOR = colors.danger;
+const HOLIDAY_SOFT = colors.dangerSoft;
 
 /**
  * One tour submission — a fresh draft ("+ Create New Tour", no route param)
@@ -52,6 +58,13 @@ export default function TourDetailScreen({ route, navigation }) {
 
   const doctorsQuery = useAsync(() => doctorsApi.listMine(), []);
   const areas = useMemo(() => [...new Set((doctorsQuery.data || []).map((d) => d.area).filter(Boolean))].sort(), [doctorsQuery.data]);
+
+  const year = Number(month.split('-')[0]);
+  const holidaysQuery = useAsync(() => holidaysApi.listHolidays(year), [year]);
+  const holidayDates = useMemo(
+    () => new Set((holidaysQuery.data || []).filter((h) => h.dateKey.startsWith(month)).map((h) => h.dateKey)),
+    [holidaysQuery.data, month]
+  );
 
   const approversQuery = useAsync(() => mtpApi.listApprovers(), []);
   const approverOptions = useMemo(() => (approversQuery.data || []).map((a) => ({
@@ -95,6 +108,12 @@ export default function TourDetailScreen({ route, navigation }) {
   const handleDayPress = (dateKey) => {
     if (!editable) return;
     setBlockError(null);
+    // Weekends are never a valid tour start or end date — existing weekday
+    // range behavior below is otherwise unchanged.
+    if (isWeekend(dateKey)) {
+      setBlockError('Saturday and Sunday cannot be selected as a tour start or end date.');
+      return;
+    }
     if (!pendingStart || hasPendingRange) {
       setPendingStart(dateKey); setPendingEnd(null); setPendingArea(null);
       return;
@@ -107,6 +126,19 @@ export default function TourDetailScreen({ route, navigation }) {
     if (!pendingStart || !pendingEnd || !pendingArea) return;
 
     const newDates = datesBetween(pendingStart, pendingEnd);
+
+    // Both endpoints are already guaranteed non-weekend (handleDayPress), but
+    // a range spanning e.g. Friday to Monday still passes through a
+    // Saturday/Sunday in between — reject the whole range with a clear
+    // message rather than silently dropping those dates from it.
+    const weekendDates = newDates.filter(isWeekend);
+    if (weekendDates.length > 0) {
+      setBlockError(
+        `This range includes ${weekendDates.length} weekend date${weekendDates.length === 1 ? '' : 's'} (${weekendDates.map(shortDate).join(', ')}). Tour ranges cannot include Saturday or Sunday.`
+      );
+      return;
+    }
+
     const existingDates = new Set();
     blocks.forEach((b) => datesBetween(b.startDate, b.endDate).forEach((d) => existingDates.add(d)));
 
@@ -181,7 +213,7 @@ export default function TourDetailScreen({ route, navigation }) {
 
         {doctorsQuery.status === 'error' && <ErrorBanner message={doctorsQuery.error} />}
 
-        <CalendarGrid month={month} blocks={blocks} pendingStart={pendingStart} pendingEnd={pendingEnd} onDayPress={editable ? handleDayPress : undefined} />
+        <CalendarGrid month={month} blocks={blocks} pendingStart={pendingStart} pendingEnd={pendingEnd} holidayDates={holidayDates} onDayPress={editable ? handleDayPress : undefined} />
 
         {plan?.submittedAt && <Text style={styles.meta}>Submitted {new Date(plan.submittedAt).toLocaleString()}</Text>}
         {plan?.approverId && (
@@ -317,7 +349,7 @@ function dayTreatment(dateKey, blocks, pendingStart, pendingEnd) {
   return null;
 }
 
-function CalendarGrid({ month, blocks, pendingStart, pendingEnd, onDayPress }) {
+function CalendarGrid({ month, blocks, pendingStart, pendingEnd, holidayDates, onDayPress }) {
   const [year, m] = month.split('-').map(Number);
   const total = daysInMonth(year, m);
   const leading = firstWeekdayMonFirst(year, m);
@@ -326,7 +358,9 @@ function CalendarGrid({ month, blocks, pendingStart, pendingEnd, onDayPress }) {
   return (
     <Card>
       <View style={styles.weekHeader}>
-        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => <Text key={d} style={styles.weekHeaderText}>{d}</Text>)}
+        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d, idx) => (
+          <Text key={d} style={[styles.weekHeaderText, idx >= 5 && styles.weekendHeaderText]}>{d}</Text>
+        ))}
       </View>
       <View style={styles.grid}>
         {cells.map((day, idx) => {
@@ -334,14 +368,26 @@ function CalendarGrid({ month, blocks, pendingStart, pendingEnd, onDayPress }) {
           const dateKey = `${month}-${String(day).padStart(2, '0')}`;
           const treatment = dayTreatment(dateKey, blocks, pendingStart, pendingEnd);
           const isEdge = treatment && (treatment.edge === 'start' || treatment.edge === 'end' || treatment.edge === 'both');
+          const weekend = isWeekend(dateKey);
+          const holiday = holidayDates?.has(dateKey);
+          // Weekends can never be a tour start/end/mid-range date — disabled
+          // here in addition to the handler-level guard in handleDayPress.
+          // Holidays stay tappable (MTP never disabled holidays before this
+          // change), just shown in red like every other calendar.
           return (
             <Pressable
               key={dateKey}
               onPress={() => onDayPress?.(dateKey)}
-              disabled={!onDayPress}
-              style={[styles.cell, styles.dayCell, treatment && { backgroundColor: treatment.soft }, isEdge && { backgroundColor: treatment.solid }]}
+              disabled={!onDayPress || weekend}
+              style={[
+                styles.cell, styles.dayCell,
+                treatment && { backgroundColor: treatment.soft },
+                isEdge && { backgroundColor: treatment.solid },
+                weekend && !treatment && styles.weekendCell,
+                holiday && styles.holidayCell
+              ]}
             >
-              <Text style={[styles.dayText, isEdge && styles.dayTextOnSolid]}>{day}</Text>
+              <Text style={[styles.dayText, isEdge && styles.dayTextOnSolid, weekend && !isEdge && styles.weekendText, holiday && !isEdge && styles.holidayText]}>{day}</Text>
               {treatment?.kind === 'block' && treatment.edge !== 'mid' && treatment.edge !== 'end' && (
                 <Text style={[styles.areaTag, isEdge && styles.areaTagOnSolid]} numberOfLines={1}>{treatment.area}</Text>
               )}
@@ -371,11 +417,16 @@ const styles = StyleSheet.create({
 
   weekHeader: { flexDirection: 'row', flexWrap: 'wrap', gap: 2, marginBottom: spacing.xs },
   weekHeaderText: { width: '13%', textAlign: 'center', fontSize: 11, fontWeight: '700', color: colors.muted },
+  weekendHeaderText: { color: colors.primary },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 2 },
   cell: { width: '13%', aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderRadius: radii.sm, paddingHorizontal: 1 },
   dayCell: {},
   dayText: { fontSize: 13, color: colors.ink },
   dayTextOnSolid: { color: colors.white, fontWeight: '700' },
+  weekendCell: { backgroundColor: colors.surface, opacity: 0.55 },
+  weekendText: { color: colors.muted },
+  holidayCell: { backgroundColor: HOLIDAY_SOFT, borderWidth: 1, borderColor: HOLIDAY_COLOR, opacity: 1 },
+  holidayText: { color: HOLIDAY_COLOR, fontWeight: '700' },
   areaTag: { fontSize: 7, color: colors.ink, marginTop: 1 },
   areaTagOnSolid: { color: colors.white },
 

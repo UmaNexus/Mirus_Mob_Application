@@ -1,9 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, TextInput, Pressable, Modal, StyleSheet } from 'react-native';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { useAsync } from '../hooks/useAsync';
+import * as holidaysApi from '../api/holidays';
 import { colors, radii, spacing, typography } from '../theme';
 
 const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+const HOLIDAY_COLOR = colors.danger;
+const HOLIDAY_SOFT = colors.dangerSoft;
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'
@@ -72,17 +76,27 @@ export default function DateField({ label, value, onChange, placeholder = 'YYYY-
   };
 
   // Build calendar matrix
-  const { blanks, days } = useMemo(() => {
-    const firstDay = new Date(viewYear, viewMonth, 1).getDay(); // 0 = Sun
+  const { blanks, days, firstDay } = useMemo(() => {
+    const firstDayOfWeek = new Date(viewYear, viewMonth, 1).getDay(); // 0 = Sun
     const totalDays = new Date(viewYear, viewMonth + 1, 0).getDate();
     return {
-      blanks: Array.from({ length: firstDay }, (_, i) => i),
+      firstDay: firstDayOfWeek,
+      blanks: Array.from({ length: firstDayOfWeek }, (_, i) => i),
       days: Array.from({ length: totalDays }, (_, i) => i + 1)
     };
   }, [viewYear, viewMonth]);
 
   const now = new Date();
   const todayKey = toDateKey(now.getFullYear(), now.getMonth(), now.getDate());
+
+  // HRMS holidays — the same existing GET /api/holidays every calendar in
+  // the app now shares; refetched only when the picker's viewed year changes.
+  const holidaysQuery = useAsync(() => holidaysApi.listHolidays(viewYear), [viewYear]);
+  const monthPrefix = `${viewYear}-${pad2(viewMonth + 1)}`;
+  const holidaySet = useMemo(
+    () => new Set((holidaysQuery.data || []).filter((h) => h.dateKey?.startsWith(monthPrefix)).map((h) => h.dateKey)),
+    [holidaysQuery.data, monthPrefix]
+  );
 
   return (
     <View style={styles.group}>
@@ -146,22 +160,31 @@ export default function DateField({ label, value, onChange, placeholder = 'YYYY-
                 const dateKey = toDateKey(viewYear, viewMonth, day);
                 const isSelected = dateKey === value;
                 const isToday = dateKey === todayKey;
+                const dow = (firstDay + day - 1) % 7; // 0 = Sun … 6 = Sat, matches WEEKDAYS above
+                const weekend = dow === 0 || dow === 6;
+                const holiday = holidaySet.has(dateKey);
 
                 return (
                   <View key={`day-${day}`} style={styles.dayCell}>
                     <Pressable
                       style={[
                         styles.dayBtn,
-                        isSelected && styles.dayBtnSelected,
-                        isToday && !isSelected && styles.dayBtnToday
+                        weekend && !holiday && !isSelected && styles.dayBtnWeekend,
+                        holiday && !isSelected && styles.dayBtnHoliday,
+                        isSelected && !holiday && styles.dayBtnSelected,
+                        isSelected && holiday && styles.dayBtnSelectedHoliday,
+                        isToday && !isSelected && !holiday && styles.dayBtnToday
                       ]}
                       onPress={() => handleSelectDay(day)}
                     >
                       <Text
                         style={[
                           styles.dayText,
-                          isSelected && styles.dayTextSelected,
-                          isToday && !isSelected && styles.dayTextToday
+                          weekend && !holiday && !isSelected && styles.dayTextWeekend,
+                          holiday && !isSelected && styles.dayTextHoliday,
+                          isSelected && !holiday && styles.dayTextSelected,
+                          isSelected && holiday && styles.dayTextSelectedHoliday,
+                          isToday && !isSelected && !holiday && styles.dayTextToday
                         ]}
                       >
                         {day}
@@ -295,6 +318,19 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: colors.primary
   },
+  dayBtnWeekend: {
+    opacity: 0.5
+  },
+  dayBtnHoliday: {
+    backgroundColor: HOLIDAY_SOFT,
+    borderWidth: 1.5,
+    borderColor: HOLIDAY_COLOR
+  },
+  // A holiday that's also selected stays red (not the usual orange fill) —
+  // holiday styling must remain clearly distinguishable when selected.
+  dayBtnSelectedHoliday: {
+    backgroundColor: HOLIDAY_COLOR
+  },
   dayText: {
     fontSize: 13,
     color: colors.ink
@@ -305,6 +341,17 @@ const styles = StyleSheet.create({
   },
   dayTextToday: {
     color: colors.primary,
+    fontWeight: '700'
+  },
+  dayTextWeekend: {
+    color: colors.muted
+  },
+  dayTextHoliday: {
+    color: HOLIDAY_COLOR,
+    fontWeight: '700'
+  },
+  dayTextSelectedHoliday: {
+    color: colors.white,
     fontWeight: '700'
   },
   calendarFooter: {

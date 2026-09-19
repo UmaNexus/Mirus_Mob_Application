@@ -83,10 +83,14 @@ export const getJointCallParticipants = asyncHandler(async (req, res) => {
  * GET /api/field-force/calendar?month=YYYY-MM&userId=
  *
  * Raw per-source data for the "Status Calendar" screen — Attendance, Leave,
- * Holiday (all existing/reused), plus WorkType (new). Merging into a single
- * day-by-day view is left to the client, since the exact precedence rule
- * (e.g. "holiday beats leave beats absent") is a presentation choice the
- * demo shows but was never specified as a hard backend rule.
+ * Holiday (all existing/reused), WorkType, and MonthlyTourPlan's
+ * `plannedVisits` (tour/MTP dates — surfaced here so the calendar can show a
+ * BDM's planned tour days alongside their actual logged activity; this does
+ * not touch the MTP approval workflow itself, it only reads the same
+ * existing documents). Merging into a single day-by-day view is left to the
+ * client, since the exact precedence rule (e.g. "holiday beats leave beats
+ * absent") is a presentation choice the demo shows but was never specified
+ * as a hard backend rule.
  *
  * `userId` defaults to the caller; a manager may request it for anyone
  * within their reporting-hierarchy scope only (never an arbitrary id).
@@ -107,14 +111,15 @@ export const getCalendar = asyncHandler(async (req, res) => {
   const [y, m] = month.split('-').map(Number);
   const range = { $gte: new Date(Date.UTC(y, m - 1, 1)), $lt: new Date(Date.UTC(y, m, 1)) };
 
-  const [attendance, leaves, holidays, workTypes] = await Promise.all([
+  const [attendance, leaves, holidays, workTypes, tourPlans] = await Promise.all([
     Attendance.find({ userId, date: range }).select('dateKey status checkIn checkOut'),
     LeaveRequest.find({ userId, fromDate: { $lte: range.$lt }, toDate: { $gte: range.$gte } }).select('type fromDate toDate status'),
     Holiday.find({ date: range }).select('dateKey name optional'),
-    WorkType.find({ userId, dateKey: { $gte: `${month}-01`, $lte: `${month}-31` } }).select('dateKey type details')
+    WorkType.find({ userId, dateKey: { $gte: `${month}-01`, $lte: `${month}-31` } }).select('dateKey type details'),
+    MonthlyTourPlan.find({ userId, month }).select('plannedVisits status')
   ]);
 
-  res.status(200).json({ success: true, data: { month, attendance, leaves, holidays, workTypes } });
+  res.status(200).json({ success: true, data: { month, attendance, leaves, holidays, workTypes, tourPlans } });
 });
 
 /**

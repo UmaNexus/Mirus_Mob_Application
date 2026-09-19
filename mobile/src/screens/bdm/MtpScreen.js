@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, Plus, CalendarDays } from 'lucide-react-nati
 import { useAsync } from '../../hooks/useAsync';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import * as mtpApi from '../../api/mtp';
+import * as holidaysApi from '../../api/holidays';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
 import StatusBadge from '../../components/StatusBadge';
@@ -14,8 +15,13 @@ import EmptyState from '../../components/EmptyState';
 import { colors, radii, spacing, typography, iconSizes } from '../../theme';
 import {
   monthKey, daysInMonth, firstWeekdayMonFirst, monthLabel, rangeLabel,
-  datesBetween, blocksFromVisits
+  datesBetween, blocksFromVisits, isWeekend
 } from '../../utils/mtpBlocks';
+
+// HRMS holidays are shown in red everywhere — reusing the shared danger
+// tokens rather than a separate holiday color.
+const HOLIDAY_COLOR = colors.danger;
+const HOLIDAY_SOFT = colors.dangerSoft;
 
 const TONE_BY_STATUS = { draft: 'neutral', pending: 'warning', approved: 'success', rejected: 'danger', withdrawn: 'neutral' };
 const BLOCK_PALETTE = [
@@ -40,6 +46,13 @@ export default function MtpScreen({ navigation }) {
   const plans = useAsync(() => mtpApi.listMine(month), [month]);
   useRefreshOnFocus(plans.reload);
   const shiftMonth = (delta) => setCursor((prev) => { const next = new Date(prev); next.setMonth(next.getMonth() + delta); return next; });
+
+  const year = Number(month.split('-')[0]);
+  const holidaysQuery = useAsync(() => holidaysApi.listHolidays(year), [year]);
+  const holidayDates = useMemo(
+    () => new Set((holidaysQuery.data || []).filter((h) => h.dateKey.startsWith(month)).map((h) => h.dateKey)),
+    [holidaysQuery.data, month]
+  );
 
   const tours = useMemo(() => (plans.data || []).map((plan) => {
     const blocks = blocksFromVisits(plan.plannedVisits || []);
@@ -83,7 +96,7 @@ export default function MtpScreen({ navigation }) {
           keyExtractor={(t) => t.plan._id}
           ListHeaderComponent={
             <>
-              <CalendarGrid month={month} blocks={allBlocksForCalendar} />
+              <CalendarGrid month={month} blocks={allBlocksForCalendar} holidayDates={holidayDates} />
               <Button icon={Plus} title="Create New Tour" onPress={() => navigation.navigate('TourDetail', { month })} style={styles.createBtn} />
               <Text style={[typography.label, styles.listLabel]}>Tour plans for {monthLabel(month)} ({tours.length})</Text>
             </>
@@ -114,7 +127,7 @@ export default function MtpScreen({ navigation }) {
   );
 }
 
-function CalendarGrid({ month, blocks }) {
+function CalendarGrid({ month, blocks, holidayDates }) {
   const [year, m] = month.split('-').map(Number);
   const total = daysInMonth(year, m);
   const leading = firstWeekdayMonFirst(year, m);
@@ -135,7 +148,9 @@ function CalendarGrid({ month, blocks }) {
   return (
     <Card style={styles.calendarCard}>
       <View style={styles.weekHeader}>
-        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => <Text key={d} style={styles.weekHeaderText}>{d}</Text>)}
+        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d, idx) => (
+          <Text key={d} style={[styles.weekHeaderText, idx >= 5 && styles.weekendHeaderText]}>{d}</Text>
+        ))}
       </View>
       <View style={styles.grid}>
         {cells.map((day, idx) => {
@@ -143,9 +158,20 @@ function CalendarGrid({ month, blocks }) {
           const dateKey = `${month}-${String(day).padStart(2, '0')}`;
           const t = treatmentFor(dateKey);
           const isEdge = t && (t.edge === 'start' || t.edge === 'end' || t.edge === 'both');
+          const weekend = isWeekend(dateKey);
+          const holiday = holidayDates?.has(dateKey);
           return (
-            <View key={dateKey} style={[styles.cell, styles.dayCell, t && { backgroundColor: t.soft }, isEdge && { backgroundColor: t.solid }]}>
-              <Text style={[styles.dayText, isEdge && styles.dayTextOnSolid]}>{day}</Text>
+            <View
+              key={dateKey}
+              style={[
+                styles.cell, styles.dayCell,
+                t && { backgroundColor: t.soft },
+                isEdge && { backgroundColor: t.solid },
+                weekend && !t && styles.weekendCell,
+                holiday && styles.holidayCell
+              ]}
+            >
+              <Text style={[styles.dayText, isEdge && styles.dayTextOnSolid, weekend && !isEdge && styles.weekendText, holiday && !isEdge && styles.holidayText]}>{day}</Text>
               {t?.edge !== 'mid' && t?.edge !== 'end' && t && (
                 <Text style={[styles.areaTag, isEdge && styles.areaTagOnSolid]} numberOfLines={1}>{t.area}</Text>
               )}
@@ -165,11 +191,16 @@ const styles = StyleSheet.create({
   calendarCard: { marginBottom: spacing.md },
   weekHeader: { flexDirection: 'row', flexWrap: 'wrap', gap: 2, marginBottom: spacing.xs },
   weekHeaderText: { width: '13%', textAlign: 'center', fontSize: 11, fontWeight: '700', color: colors.muted },
+  weekendHeaderText: { color: colors.primary },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 2 },
   cell: { width: '13%', aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderRadius: radii.sm, paddingHorizontal: 1 },
   dayCell: {},
   dayText: { fontSize: 13, color: colors.ink },
   dayTextOnSolid: { color: colors.white, fontWeight: '700' },
+  weekendCell: { backgroundColor: colors.surface, opacity: 0.55 },
+  weekendText: { color: colors.muted },
+  holidayCell: { backgroundColor: HOLIDAY_SOFT, borderWidth: 1, borderColor: HOLIDAY_COLOR, opacity: 1 },
+  holidayText: { color: HOLIDAY_COLOR, fontWeight: '700' },
   areaTag: { fontSize: 7, color: colors.ink, marginTop: 1 },
   areaTagOnSolid: { color: colors.white },
 

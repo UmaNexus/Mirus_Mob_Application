@@ -130,6 +130,69 @@ test('a manager can view their own subtree BDM\'s calendar, but not an unrelated
   assert.equal(blocked.status, 403);
 });
 
+test('calendar surfaces the caller\'s real MTP plannedVisits for the month, from the existing MonthlyTourPlan model', async () => {
+  const { asmAgent, bdm, bdmAgent } = await setupAsmBdm();
+  await asmAgent.post('/api/doctors').send({ name: 'Dr. Calendar A', area: 'Banjara Hills', assignedTo: String(bdm._id) });
+  await asmAgent.post('/api/doctors').send({ name: 'Dr. Calendar B', area: 'Jubilee Hills', assignedTo: String(bdm._id) });
+  const created = await bdmAgent.post('/api/mtp').send({
+    month: '2026-08',
+    plannedVisits: [{ area: 'Banjara Hills', date: '2026-08-10' }, { area: 'Jubilee Hills', date: '2026-08-11' }]
+  });
+  assert.equal(created.status, 201, `mtp create failed: ${JSON.stringify(created.body)}`);
+
+  const res = await bdmAgent.get('/api/field-force/calendar?month=2026-08');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.tourPlans.length, 1);
+  assert.equal(res.body.data.tourPlans[0].plannedVisits.length, 2);
+  assert.equal(res.body.data.tourPlans[0].plannedVisits[0].area, 'Banjara Hills');
+});
+
+test('calendar returns an empty tourPlans array, not an error, for a month with no MTP plan', async () => {
+  const { bdmAgent } = await setupAsmBdm();
+  const res = await bdmAgent.get('/api/field-force/calendar?month=2026-08');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.data.tourPlans, []);
+});
+
+test('a manager sees their subtree BDM\'s MTP plan via calendar, but not an unrelated BDM\'s', async () => {
+  const { asmAgent, bdm, bdmAgent } = await setupAsmBdm();
+  const { asmAgent: otherAsmAgent, bdm: otherBdm, bdmAgent: otherBdmAgent } = await setupAsmBdm();
+  await asmAgent.post('/api/doctors').send({ name: 'Dr. Calendar C', area: 'Kondapur', assignedTo: String(bdm._id) });
+  await otherAsmAgent.post('/api/doctors').send({ name: 'Dr. Calendar D', area: 'Madhapur', assignedTo: String(otherBdm._id) });
+  await bdmAgent.post('/api/mtp').send({ month: '2026-08', plannedVisits: [{ area: 'Kondapur', date: '2026-08-05' }] });
+  await otherBdmAgent.post('/api/mtp').send({ month: '2026-08', plannedVisits: [{ area: 'Madhapur', date: '2026-08-05' }] });
+
+  const res = await asmAgent.get(`/api/field-force/calendar?month=2026-08&userId=${bdm._id}`);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.tourPlans.length, 1);
+  assert.equal(res.body.data.tourPlans[0].plannedVisits[0].area, 'Kondapur');
+
+  assert.equal((await asmAgent.get(`/api/field-force/calendar?month=2026-08&userId=${otherBdm._id}`)).status, 403);
+});
+
+test('calendar surfaces a real HRMS holiday (from the existing Holiday model/API) with its name, tenant-scoped', async () => {
+  const { company, bdmAgent } = await setupAsmBdm();
+  const { agent: adminAgent } = await authAgent(app, { company, email: 'holiday-admin@xyz.com', role: 'admin' });
+  await adminAgent.post('/api/holidays').send({ date: '2026-08-15', name: 'Independence Day' });
+
+  const res = await bdmAgent.get('/api/field-force/calendar?month=2026-08');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.holidays.length, 1);
+  assert.equal(res.body.data.holidays[0].name, 'Independence Day');
+  assert.equal(res.body.data.holidays[0].dateKey, '2026-08-15');
+});
+
+test('a holiday created in another company never appears in this company\'s calendar', async () => {
+  const { bdmAgent } = await setupAsmBdm();
+  const companyB = await createCompany({ slug: 'calendar-holiday-cross-tenant' });
+  const { agent: adminBAgent } = await authAgent(app, { company: companyB, email: 'holiday-admin-b@xyz.com', role: 'admin' });
+  await adminBAgent.post('/api/holidays').send({ date: '2026-08-15', name: 'Company B Only Holiday' });
+
+  const res = await bdmAgent.get('/api/field-force/calendar?month=2026-08');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.holidays.length, 0);
+});
+
 // ---------- Alerts ----------
 
 test('the combined alerts feed includes both doctor and secondary-sale alerts', async () => {

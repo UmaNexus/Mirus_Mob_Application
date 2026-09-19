@@ -3,6 +3,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import ManagerMoreScreen from '../../screens/manager/ManagerMoreScreen';
 import DcrReviewScreen from '../../screens/manager/DcrReviewScreen';
 import DcrReviewDetailScreen from '../../screens/manager/DcrReviewDetailScreen';
+import CalendarScreen from '../../screens/bdm/CalendarScreen';
 import { colors } from '../../theme';
 
 const Stack = createNativeStackNavigator();
@@ -13,6 +14,7 @@ export default function ManagerMoreStack() {
       <Stack.Screen name="ManagerMoreMain" component={ManagerMoreScreen} options={{ title: 'More' }} />
       <Stack.Screen name="DcrReview" component={DcrReviewScreen} options={{ title: 'DCR Review' }} />
       <Stack.Screen name="DcrReviewDetail" component={DcrReviewDetailScreen} options={{ title: 'Daily Report' }} />
+      <Stack.Screen name="Calendar" component={CalendarScreen} options={{ title: 'Status Calendar' }} />
     </Stack.Navigator>
   );
 }

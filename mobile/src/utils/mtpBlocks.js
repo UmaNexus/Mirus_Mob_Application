@@ -15,6 +15,11 @@ export const monthKey = (d) => d.toISOString().slice(0, 7);
 export const daysInMonth = (year, month) => new Date(Date.UTC(year, month, 0)).getUTCDate();
 export const firstWeekdayMonFirst = (year, month) => (new Date(Date.UTC(year, month - 1, 1)).getUTCDay() + 6) % 7;
 
+export const isWeekend = (dateKey) => {
+  const day = new Date(`${dateKey}T00:00:00Z`).getUTCDay();
+  return day === 0 || day === 6;
+};
+
 export const monthLabel = (month) => {
   const [y, m] = month.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' });
