@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CircleCheck, CircleX, MapPin, UserRound } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import * as mtpApi from '../../api/mtp';
-import { displayName } from '../../navigation/roleHelpers';
+import { displayName, isManagerTier } from '../../navigation/roleHelpers';
 import { blocksFromVisits, rangeLabel } from '../../utils/mtpBlocks';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
@@ -43,7 +43,7 @@ export default function MtpReviewScreen({ route, navigation }) {
     || (plan.approverId?.role === 'admin' || plan.approverId?.role === 'superadmin' ? 'Admin' : null);
 
   const isDesignatedApprover = plan.approverId && String(plan.approverId._id || plan.approverId) === String(user?._id);
-  const canDecide = plan.status === 'pending' && isDesignatedApprover;
+  const canDecide = plan.status === 'pending' && (isDesignatedApprover || isManagerTier(user));
 
   const decide = async (status) => {
     setError(null); setBusy(true);

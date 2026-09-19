@@ -31,8 +31,9 @@ router.get('/attendance', requirePermission(PERMISSIONS.ATTENDANCE_MANAGE), list
 router.post('/leaves', applyLeave);
 router.get('/leaves/mine', listMyLeaves);
 router.patch('/leaves/:id/cancel', cancelLeave);
-router.get('/leaves', requirePermission(PERMISSIONS.LEAVE_APPROVE), listLeaves);
-router.patch('/leaves/:id/decision', requirePermission(PERMISSIONS.LEAVE_APPROVE), decideLeave);
+router.get('/leaves', requireFieldCapability(PERMISSIONS.LEAVE_APPROVE, 'ASM'), listLeaves);
+router.patch('/leaves/:id/decision', requireFieldCapability(PERMISSIONS.LEAVE_APPROVE, 'ASM'), decideLeave);
+
 
 // Holidays
 router.get('/holidays', listHolidays); // any authenticated user

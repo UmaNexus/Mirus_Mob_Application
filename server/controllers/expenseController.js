@@ -7,7 +7,7 @@ import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { logActivity } from '../services/activityService.js';
 import { rupeesToPaisa } from '../utils/money.js';
-import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds } from '../middleware/fieldForceAuth.js';
+import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds, canAccessFieldOpsUser } from '../middleware/fieldForceAuth.js';
 
 /**
  * POST /api/expenses — a BDM submits an expense claim, optionally with a
@@ -95,10 +95,16 @@ export const listTeamExpenses = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data: expenses });
 });
 
-/** GET /api/expenses/pending — an approver's own inbox (approverId=self, stamped at submission). */
+/** GET /api/expenses/pending — an approver's inbox (approverId=self or submitter in caller's reporting subtree). */
 export const listPendingApprovals = asyncHandler(async (req, res) => {
   const filter = { status: 'pending' };
-  if (!hasCompanyWideFieldOpsAccess(req.user)) filter.approverId = req.user._id;
+  if (!hasCompanyWideFieldOpsAccess(req.user)) {
+    const subtree = await buildReportingSubtreeIds(req.user._id);
+    filter.$or = [
+      { approverId: req.user._id },
+      { userId: { $in: [...subtree] } }
+    ];
+  }
   const expenses = await Expense.find(filter)
     .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce')
     .sort({ createdAt: 1 });
@@ -106,9 +112,9 @@ export const listPendingApprovals = asyncHandler(async (req, res) => {
 });
 
 /**
- * PATCH /api/expenses/:id/decision — approve/reject. Only the exact
- * `approverId` stamped on this expense at submission time (or admin/
- * superadmin) may decide it — matching the strict-hierarchy rule used for MTP.
+ * PATCH /api/expenses/:id/decision — approve/reject. Either the designated
+ * approver stamped at submission or any manager above the claimant in the
+ * reporting chain (or admin/superadmin) may decide it.
  */
 export const decideExpense = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid expense id');
@@ -118,11 +124,13 @@ export const decideExpense = asyncHandler(async (req, res) => {
   if (expense.status !== 'pending') throw new ApiError(400, `Expense is already ${expense.status}`);
 
   const isDesignatedApprover = expense.approverId && String(expense.approverId) === String(req.user._id);
-  if (!isDesignatedApprover && !hasCompanyWideFieldOpsAccess(req.user)) {
-    throw new ApiError(403, 'Only the assigned approver may decide this expense');
+  const isAuthorizedManager = await canAccessFieldOpsUser(req.user, expense.userId);
+  if (!isDesignatedApprover && !isAuthorizedManager && !hasCompanyWideFieldOpsAccess(req.user)) {
+    throw new ApiError(403, 'Only the assigned approver or authorized manager may decide this expense');
   }
 
   expense.status = status;
+  expense.approverId = req.user._id;
   expense.decidedAt = new Date();
   expense.decisionNote = note || '';
   await expense.save();

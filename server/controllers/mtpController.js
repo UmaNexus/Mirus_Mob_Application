@@ -5,7 +5,7 @@ import User from '../models/User.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { logActivity } from '../services/activityService.js';
-import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds, buildReportingChainAbove } from '../middleware/fieldForceAuth.js';
+import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds, buildReportingChainAbove, canAccessFieldOpsUser } from '../middleware/fieldForceAuth.js';
 
 const EDITABLE_STATUSES = ['draft', 'rejected', 'withdrawn'];
 const APPROVER_SELECT = 'personalDetails.firstName personalDetails.lastName role employeeDetails.fieldForce';
@@ -219,9 +219,9 @@ export const withdrawMtp = asyncHandler(async (req, res) => {
 });
 
 /**
- * PATCH /api/mtp/:id/decision — approve/reject. Only the server-computed
- * `approverId` on this specific MTP (or admin/superadmin) may decide it —
- * never "any manager above," matching the strict-hierarchy decision.
+ * PATCH /api/mtp/:id/decision — approve/reject. Either the designated
+ * approver stamped on this MTP or any manager above the claimant in the
+ * reporting chain (or admin/superadmin) may decide it.
  */
 export const decideMtp = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid MTP id');
@@ -231,11 +231,19 @@ export const decideMtp = asyncHandler(async (req, res) => {
   if (plan.status !== 'pending') throw new ApiError(400, `MTP is already ${plan.status}`);
 
   const isDesignatedApprover = plan.approverId && String(plan.approverId) === String(req.user._id);
-  if (!isDesignatedApprover && !hasCompanyWideFieldOpsAccess(req.user)) {
-    throw new ApiError(403, 'Only the assigned approver may decide this MTP');
+  let isSeniorToApprover = false;
+  if (plan.approverId) {
+    const subtree = await buildReportingSubtreeIds(req.user._id);
+    isSeniorToApprover = subtree.has(String(plan.approverId));
+  } else {
+    isSeniorToApprover = await canAccessFieldOpsUser(req.user, plan.userId);
+  }
+  if (!isDesignatedApprover && !isSeniorToApprover && !hasCompanyWideFieldOpsAccess(req.user)) {
+    throw new ApiError(403, 'Only the assigned approver or authorized manager may decide this MTP');
   }
 
   plan.status = status;
+  plan.approverId = req.user._id;
   plan.decidedAt = new Date();
   plan.decisionNote = note || '';
   await plan.save();
@@ -249,11 +257,16 @@ export const decideMtp = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, message: `MTP ${status}`, mtp: plan });
 });
 
-/** GET /api/mtp/pending — the caller's own approval inbox (MTPs awaiting their decision). */
+/** GET /api/mtp/pending — MTPs awaiting the caller's decision (approverId=self, or assigned to subordinate manager, or unassigned in reporting subtree). */
 export const listPendingApprovals = asyncHandler(async (req, res) => {
   const filter = { status: 'pending' };
   if (!hasCompanyWideFieldOpsAccess(req.user)) {
-    filter.approverId = req.user._id;
+    const subtree = await buildReportingSubtreeIds(req.user._id);
+    filter.$or = [
+      { approverId: req.user._id },
+      { approverId: { $in: [...subtree] } },
+      { approverId: null, userId: { $in: [...subtree] } }
+    ];
   }
   const plans = await MonthlyTourPlan.find(filter)
     .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce')

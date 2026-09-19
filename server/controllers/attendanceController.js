@@ -11,6 +11,9 @@ import {
   parseSingleDayAttendanceWorkbook,
   normalizePhoneDigits
 } from '../services/mirusAttendanceImport.js';
+import { PERMISSIONS, roleHasPermission } from '../config/permissions.js';
+import { buildReportingSubtreeIds, canAccessFieldOpsUser } from '../middleware/fieldForceAuth.js';
+
 
 const dateKeyOf = (d) => new Date(d).toISOString().slice(0, 10); // 'YYYY-MM-DD'
 
@@ -489,12 +492,17 @@ export const listMyLeaves = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data: leaves });
 });
 
-/** GET /api/leaves?status&userId&type&from&to — leave register (HR). */
+/** GET /api/leaves?status&userId&type&from&to — leave register (HR / Manager). */
 export const listLeaves = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.status) filter.status = req.query.status;
   if (req.query.type) filter.type = req.query.type;
   if (req.query.userId && mongoose.isValidObjectId(req.query.userId)) filter.userId = req.query.userId;
+
+  if (!roleHasPermission(req.user.role, PERMISSIONS.LEAVE_APPROVE)) {
+    const subtree = await buildReportingSubtreeIds(req.user._id);
+    filter.userId = { $in: [...subtree] };
+  }
 
   // Overlap with [from, to]: leave.fromDate <= endOf(to) AND leave.toDate >= startOf(from)
   if (req.query.from || req.query.to) {
@@ -505,25 +513,30 @@ export const listLeaves = asyncHandler(async (req, res) => {
   }
 
   const leaves = await LeaveRequest.find(filter)
-    .populate('userId', 'email personalDetails.firstName personalDetails.lastName employeeDetails.employeeId')
+    .populate('userId', 'email personalDetails.firstName personalDetails.lastName employeeDetails.employeeId employeeDetails.fieldForce')
     .sort({ createdAt: -1 })
     .limit(1000);
   res.status(200).json({ success: true, data: leaves });
 });
 
-/** PATCH /api/leaves/:id/decision — approve/reject (HR). Body: { status, note } */
+/** PATCH /api/leaves/:id/decision — approve/reject (HR / Manager). Body: { status, note } */
 export const decideLeave = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid leave id');
   const { status, note } = req.body;
   if (!['Approved', 'Rejected'].includes(status)) throw new ApiError(400, 'status must be Approved or Rejected');
   const leave = await LeaveRequest.findById(req.params.id);
   if (!leave) throw new ApiError(404, 'Leave request not found');
+
+  const allowed = roleHasPermission(req.user.role, PERMISSIONS.LEAVE_APPROVE) || (await canAccessFieldOpsUser(req.user, leave.userId));
+  if (!allowed) throw new ApiError(403, 'You are not authorized to decide this leave request');
+
   if (leave.status !== 'Pending') throw new ApiError(400, `Leave is already ${leave.status}`);
   leave.status = status;
   leave.approverId = req.user._id;
   leave.decidedAt = new Date();
   leave.decisionNote = note;
   await leave.save();
+
 
   if (status === 'Approved') {
     const cur = new Date(leave.fromDate);
