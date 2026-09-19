@@ -92,15 +92,6 @@ export const createDcr = asyncHandler(async (req, res) => {
     visitTime: visitTime ? new Date(visitTime) : new Date()
   });
   await dcr.populate('doctorId', DOCTOR_SELECT);
-  console.log('========== DCR CREATED ==========');
-  console.log('DCR ID:', dcr._id);
-  console.log('USER ID:', dcr.userId);
-  console.log('DATE KEY:', dcr.dateKey);
-  console.log('TYPE:', dcr.type);
-  console.log('STATUS:', dcr.status);
-  console.log('DOCTOR ID:', dcr.doctorId);
-  console.log('PRODUCTS:', dcr.productsDetailed);
-  console.log('================================');
 
   await logActivity({
     actor: req.user, action: `dcr.${type}`, entityType: 'DailyCallReport', entityId: dcr._id,
