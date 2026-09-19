@@ -3,7 +3,7 @@ import User from '../models/User.js';
 import { FIELD_TIERS } from '../config/fieldForce.js';
 import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds } from '../middleware/fieldForceAuth.js';
 
-const TEAM_SELECT = '_id email personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce employeeDetails.reportingManagerId';
+const TEAM_SELECT = '_id email isActive personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce employeeDetails.reportingManagerId employeeDetails.employeeId';
 
 /**
  * GET /api/field-force/team

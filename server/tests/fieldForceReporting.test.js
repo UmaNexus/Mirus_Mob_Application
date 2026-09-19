@@ -202,3 +202,107 @@ test('an admin in one company never sees another company\'s monitor data', async
   assert.equal(res.status, 200);
   assert.equal(res.body.data.teamSize, 0);
 });
+
+// ---------- Team performance: per-BDM breakdown, subtree scoping, tenant isolation ----------
+
+test('a BDM cannot reach team-performance (ASM+ only)', async () => {
+  const { bdmAgent } = await setupAsmBdm();
+  assert.equal((await bdmAgent.get('/api/field-force/team-performance')).status, 403);
+});
+
+test('team-performance returns only the caller\'s own subtree BDMs, with real name/employeeId/territory', async () => {
+  const company = await getDefaultCompany();
+  const { asmAgent, bdm, bdmAgent } = await setupAsmBdm();
+  await createUser({
+    companyId: company._id, employeeDetails: { fieldForce: { tier: 'BDM' } },
+    email: 'unrelated-perf-bdm@xyz.com'
+  });
+  const bdmDoc = await (await import('../models/User.js')).default.findById(bdm._id);
+  bdmDoc.employeeDetails.employeeId = 'PERF-BDM-1';
+  bdmDoc.employeeDetails.fieldForce.territory = 'Pune Central';
+  bdmDoc.personalDetails.firstName = 'Priya';
+  bdmDoc.personalDetails.lastName = 'Desai';
+  await bdmDoc.save();
+
+  const doctor = await asmAgent.post('/api/doctors').send({ name: 'Dr. Perf', assignedTo: String(bdm._id) });
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId: doctor.body.doctor._id });
+
+  const res = await asmAgent.get('/api/field-force/team-performance');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.summary.totalBdms, 1, 'only the ASM\'s own BDM, never the unrelated one');
+  const row = res.body.data[0];
+  assert.equal(row.name, 'Priya Desai');
+  assert.equal(row.employeeId, 'PERF-BDM-1');
+  assert.equal(row.territory, 'Pune Central');
+  assert.ok(['top', 'active', 'review', 'low'].includes(row.status));
+});
+
+test('team-performance is company-wide for admin, and tenant-isolated', async () => {
+  const companyA = await createCompany({ slug: 'perf-alpha' });
+  const companyB = await createCompany({ slug: 'perf-beta' });
+  const { agent: adminA } = await authAgent(app, { company: companyA, email: 'admin-a-perf@xyz.com', role: 'admin' });
+  await createUser({ companyId: companyA._id, email: 'bdm-a-perf@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  await createUser({ companyId: companyB._id, email: 'bdm-b-perf@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+
+  const res = await adminA.get('/api/field-force/team-performance');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.summary.totalBdms, 1, 'admin sees only their own company\'s BDMs');
+});
+
+// ---------- Team attendance: hierarchy scoping, punch status, tenant isolation ----------
+
+test('a BDM cannot reach team-attendance (ASM+ only)', async () => {
+  const { bdmAgent } = await setupAsmBdm();
+  assert.equal((await bdmAgent.get('/api/field-force/team-attendance')).status, 403);
+});
+
+test('team-attendance (today) reports punched-in status correctly, scoped to the caller\'s own subtree', async () => {
+  const company = await getDefaultCompany();
+  const { asmAgent, asm, bdmAgent, bdm } = await setupAsmBdm();
+  const { bdmAgent: unrelatedBdmAgent } = await setupAsmBdm();
+  const secondBdm = await createUser({
+    companyId: company._id, email: 'second-att-bdm@xyz.com',
+    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+  });
+
+  await bdmAgent.post('/api/attendance/punch-in');
+  await unrelatedBdmAgent.post('/api/attendance/punch-in'); // must never appear in the ASM's results
+  // secondBdm never punches in — stays "not in".
+
+  const res = await asmAgent.get('/api/field-force/team-attendance?period=today');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.summary.totalBdms, 2, 'only the ASM\'s own two subtree BDMs, never the unrelated one');
+  assert.equal(res.body.summary.punchedIn, 1);
+  assert.equal(res.body.summary.notIn, 1);
+
+  const punchedInRow = res.body.rows.find((r) => String(r.userId) === String(bdm._id));
+  assert.equal(punchedInRow.status, 'in');
+  assert.ok(punchedInRow.punchInAt);
+
+  const notInRow = res.body.rows.find((r) => String(r.userId) === String(secondBdm._id));
+  assert.equal(notInRow.status, 'out');
+});
+
+test('team-attendance never includes a BDM outside the caller\'s reporting subtree, and admin sees company-wide', async () => {
+  const companyA = await createCompany({ slug: 'att-alpha' });
+  const companyB = await createCompany({ slug: 'att-beta' });
+  const { agent: adminA } = await authAgent(app, { company: companyA, email: 'admin-a-att@xyz.com', role: 'admin' });
+  await createUser({ companyId: companyA._id, email: 'bdm-a-att@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  await createUser({ companyId: companyB._id, email: 'bdm-b-att@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+
+  const res = await adminA.get('/api/field-force/team-attendance');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.summary.totalBdms, 1, 'admin sees only their own company\'s BDMs');
+});
+
+test('team-attendance includes a fixed current-month monthlySummary regardless of the selected period', async () => {
+  const { asmAgent, bdmAgent } = await setupAsmBdm();
+  await bdmAgent.post('/api/attendance/punch-in');
+
+  const res = await asmAgent.get('/api/field-force/team-attendance?period=month');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.period, 'month');
+  assert.ok(res.body.monthlySummary);
+  assert.equal(res.body.monthlySummary.month, new Date().toISOString().slice(0, 7));
+  assert.ok(res.body.monthlySummary.presentDaysAvg >= 0);
+});

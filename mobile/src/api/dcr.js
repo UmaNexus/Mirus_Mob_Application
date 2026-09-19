@@ -15,3 +15,13 @@ export const markRemainingMissed = (date) => api.patch('/dcr/mark-remaining-miss
 
 /** The caller's own reporting-manager chain — for the joint-call "accompanied by" picker. */
 export const myChain = () => api.get('/field-force/my-chain').then((res) => res.data.data);
+
+/**
+ * Manager (ASM+) read-only review of their reporting subtree's calls —
+ * already scoped server-side to the caller's own hierarchy. `period` is
+ * 'today' | 'week' | 'month'. Returns raw DCR rows (doctor/area/type/
+ * products/samples/feedback/times/status/submittedAt + the submitting
+ * BDM's name/employeeId) — the screen groups these by BDM+date itself for
+ * both the review list and its detail view, rather than a second call.
+ */
+export const listTeam = (period) => api.get('/dcr/team', { params: { period } }).then((res) => res.data.data);

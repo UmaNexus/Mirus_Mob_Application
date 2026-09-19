@@ -743,3 +743,124 @@ test('a submitted DCR is visible to the reporting ASM via /team, correctly scope
   assert.equal(res.body.data[0].status, 'completed');
   assert.ok(res.body.data[0].submittedAt);
 });
+
+// ---------- Manager DCR Review: today/week/month period filtering + full hierarchy scoping ----------
+
+const daysAgoISO = (n) => {
+  const d = new Date();
+  d.setUTCHours(9, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() - n);
+  return d.toISOString();
+};
+
+test('period=today (the default) only returns today\'s calls via /team, not yesterday\'s', async () => {
+  const { bdmAgent, asmAgent, doctorId } = await setupAsmBdmDoctor();
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: daysAgoISO(0) });
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: daysAgoISO(1) });
+
+  const res = await asmAgent.get('/api/dcr/team');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 1);
+});
+
+test('period=week returns this week\'s calls but not one from last week', async () => {
+  const { bdmAgent, asmAgent, doctorId } = await setupAsmBdmDoctor();
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: daysAgoISO(0) });
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: daysAgoISO(9) });
+
+  const res = await asmAgent.get('/api/dcr/team?period=week');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 1, 'only the call within the current Mon-Sun week should be included');
+});
+
+test('period=month returns this month\'s calls but not one from 2 months ago', async () => {
+  const { bdmAgent, asmAgent, doctorId } = await setupAsmBdmDoctor();
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: daysAgoISO(0) });
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: daysAgoISO(65) });
+
+  const res = await asmAgent.get('/api/dcr/team?period=month');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 1);
+});
+
+test('an explicit ?date= still takes precedence over period, unaffected by today\'s default', async () => {
+  const { bdmAgent, asmAgent, doctorId } = await setupAsmBdmDoctor();
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: daysAgoISO(3) });
+
+  const res = await asmAgent.get(`/api/dcr/team?date=${daysAgoISO(3).slice(0, 10)}`);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 1);
+});
+
+test('an RSM sees their whole downstream subtree\'s calls (ZSM has no direct reports here, ASM+BDM do) via /team', async () => {
+  const { company, rsm, bdmAgent, doctorId } = await setupFullChainWithTeam();
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: daysAgoISO(0) });
+  const rsmAgent = await loginAs(company, rsm);
+
+  const res = await rsmAgent.get('/api/dcr/team');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 1);
+});
+
+test('a ZSM sees their whole downstream subtree\'s calls via /team', async () => {
+  const { company, zsm, bdmAgent, doctorId } = await setupFullChainWithTeam();
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: daysAgoISO(0) });
+  const zsmAgent = await loginAs(company, zsm);
+
+  const res = await zsmAgent.get('/api/dcr/team');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 1);
+});
+
+test('an NSM sees their whole downstream subtree\'s calls via /team', async () => {
+  const { company, nsm, bdmAgent, doctorId } = await setupFullChainWithTeam();
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: daysAgoISO(0) });
+  const nsmAgent = await loginAs(company, nsm);
+
+  const res = await nsmAgent.get('/api/dcr/team');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 1);
+});
+
+test('an RSM never sees calls from a BDM outside their own downstream subtree', async () => {
+  const { company, rsm } = await setupFullChainWithTeam();
+  const { bdmAgent: unrelatedBdmAgent, doctorId: unrelatedDoctorId } = await setupFullChainWithTeam();
+  await unrelatedBdmAgent.post('/api/dcr').send({ type: 'individual', doctorId: unrelatedDoctorId, date: daysAgoISO(0) });
+  const rsmAgent = await loginAs(company, rsm);
+
+  const res = await rsmAgent.get('/api/dcr/team');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 0);
+});
+
+test('admin sees company-wide calls via /team, correctly excluding another tenant\'s', async () => {
+  const { admin, adminAgent, bdmAgent, doctorId } = await setupFullChainWithTeam();
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: daysAgoISO(0) });
+
+  const companyB = await createCompany({ slug: 'dcr-review-admin-cross-tenant' });
+  const asmB = await createUser({ companyId: companyB._id, email: 'asmb-review@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const bdmB = await createUser({
+    companyId: companyB._id, email: 'bdmb-review@xyz.com', password: 'Password1',
+    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asmB._id }
+  });
+  const bdmBAgent = await loginAs(companyB, bdmB);
+  const asmBAgent = await loginAs(companyB, asmB);
+  const doctorB = await asmBAgent.post('/api/doctors').send({ name: 'Dr. Beta Review', assignedTo: String(bdmB._id) });
+  await bdmBAgent.post('/api/dcr').send({ type: 'individual', doctorId: doctorB.body.doctor._id, date: daysAgoISO(0) });
+
+  assert.ok(admin); // sanity: admin resolved from the correct tenant's chain
+  const res = await adminAgent.get('/api/dcr/team');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 1, 'admin must see only their own company\'s calls, never companyB\'s');
+});
+
+test('/team response carries the submitting BDM\'s name and Employee ID for the review list/detail UI', async () => {
+  const { bdm, bdmAgent, asmAgent, doctorId } = await setupAsmBdmDoctor();
+  await User.updateOne({ _id: bdm._id }, { $set: { 'employeeDetails.employeeId': 'BDM-REVIEW-01' } });
+  await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: daysAgoISO(0) });
+
+  const res = await asmAgent.get('/api/dcr/team');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data[0].userId.employeeDetails.employeeId, 'BDM-REVIEW-01');
+  assert.equal(res.body.data[0].userId.personalDetails.firstName, 'Test');
+});

@@ -1,5 +1,8 @@
 import { Router } from 'express';
-import { getCalendar, getMyAlerts, getMyDashboard, getMonitor, getMyReportingChain, getJointCallParticipants } from '../controllers/fieldForceReportingController.js';
+import {
+  getCalendar, getMyAlerts, getMyDashboard, getMonitor, getMyReportingChain, getJointCallParticipants,
+  getTeamPerformance, getTeamAttendance
+} from '../controllers/fieldForceReportingController.js';
 import { verifyToken } from '../middleware/authMiddleware.js';
 import { requireFieldTier, requireFieldCapability } from '../middleware/fieldForceAuth.js';
 import { PERMISSIONS } from '../config/permissions.js';
@@ -14,5 +17,7 @@ router.get('/calendar', requireFieldTier('BDM'), getCalendar);
 router.get('/alerts', requireFieldTier('BDM'), getMyAlerts);
 router.get('/dashboard', requireFieldTier('BDM'), getMyDashboard);
 router.get('/monitor', requireFieldCapability(PERMISSIONS.FIELDOPS_MONITOR, 'ASM'), getMonitor);
+router.get('/team-performance', requireFieldCapability(PERMISSIONS.FIELDOPS_MONITOR, 'ASM'), getTeamPerformance);
+router.get('/team-attendance', requireFieldCapability(PERMISSIONS.FIELDOPS_MONITOR, 'ASM'), getTeamAttendance);
 
 export default router;

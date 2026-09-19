@@ -1,14 +1,14 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LogOut } from 'lucide-react-native';
+import { LogOut, ClipboardList, ChevronRight } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { displayName, resolveUserTier } from '../../navigation/roleHelpers';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
-import { colors, spacing, typography } from '../../theme';
+import { colors, spacing, typography, iconSizes } from '../../theme';
 
-export default function ManagerMoreScreen() {
+export default function ManagerMoreScreen({ navigation }) {
   const { user, signOut } = useAuth();
   const tier = resolveUserTier(user);
 
@@ -24,14 +24,20 @@ export default function ManagerMoreScreen() {
           <Text style={styles.role}>
             {tier ? `${tier} · ${user?.employeeDetails?.fieldForce?.territory || 'MIRUS'}` : 'MIRUS'}
           </Text>
-          <Button
-            icon={LogOut}
-            title="Sign out"
-            variant="outline"
-            onPress={signOut}
-            style={styles.signOutBtn}
-          />
         </Card>
+
+        <Pressable onPress={() => navigation.navigate('DcrReview')} accessibilityRole="button">
+          <Card style={styles.navRow}>
+            <ClipboardList size={iconSizes.header} color={colors.primary} />
+            <View style={styles.navRowText}>
+              <Text style={styles.navRowTitle}>DCR Review</Text>
+              <Text style={styles.navRowSubtitle}>Review your team's submitted daily call reports</Text>
+            </View>
+            <ChevronRight size={iconSizes.header} color={colors.muted} />
+          </Card>
+        </Pressable>
+
+        <Button icon={LogOut} title="Sign out" variant="outline" onPress={signOut} />
       </View>
     </SafeAreaView>
   );
@@ -44,5 +50,8 @@ const styles = StyleSheet.create({
   card: { gap: spacing.xs },
   name: { fontSize: 18, fontWeight: '700', color: colors.ink },
   role: { fontSize: 13, color: colors.primary, fontWeight: '600' },
-  signOutBtn: { marginTop: spacing.md }
+  navRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  navRowText: { flex: 1 },
+  navRowTitle: { fontSize: 14, fontWeight: '600', color: colors.ink },
+  navRowSubtitle: { fontSize: 12, color: colors.muted, marginTop: 2 }
 });

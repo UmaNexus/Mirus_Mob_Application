@@ -14,7 +14,7 @@ import LoadingView from '../../components/LoadingView';
 import ErrorBanner from '../../components/ErrorBanner';
 import SuccessBanner from '../../components/SuccessBanner';
 import EmptyState from '../../components/EmptyState';
-import { colors, spacing, typography } from '../../theme';
+import { colors, radii, spacing, typography } from '../../theme';
 
 const emptyForm = { name: '', speciality: '', area: '', phone: '', assignedTo: null };
 
@@ -25,9 +25,31 @@ const emptyForm = { name: '', speciality: '', area: '', phone: '', assignedTo: n
  * this screen has no way to display or target anyone outside it, and every
  * write is re-checked server-side (canAccessFieldOpsUser) regardless.
  */
+const TABS = [
+  { value: 'all', label: 'All Doctors' },
+  { value: 'assigned', label: 'Assigned' },
+  { value: 'unassigned', label: 'Unassigned' },
+  { value: 'byBdm', label: 'By BDM' }
+];
+
 export default function DoctorAssignmentScreen({ navigation }) {
   const [search, setSearch] = useState('');
-  const doctors = useAsync(() => doctorsApi.listManaged({ search: search.trim() || undefined }), [search]);
+  const [tab, setTab] = useState('all');
+  const [byBdmFilter, setByBdmFilter] = useState(null);
+
+  // The server is the only source of "unassigned"/"assigned to this exact
+  // BDM" truth — 'assigned' (any BDM) is filtered client-side over the same
+  // already-subtree-scoped list, since there's no dedicated server filter
+  // for "has any assignee" and the list is already bounded to the caller's
+  // own authorized doctors.
+  const doctors = useAsync(
+    () => doctorsApi.listManaged({
+      search: search.trim() || undefined,
+      unassigned: tab === 'unassigned' ? true : undefined,
+      assignedTo: tab === 'byBdm' && byBdmFilter ? byBdmFilter : undefined
+    }),
+    [search, tab, byBdmFilter]
+  );
   const team = useAsync(fieldForceApi.getTeam, []);
   useRefreshOnFocus(doctors.reload);
   useRefreshOnFocus(team.reload);
@@ -39,6 +61,15 @@ export default function DoctorAssignmentScreen({ navigation }) {
     [team.data]
   );
   const bdmNameById = useMemo(() => new Map(bdmOptions.map((o) => [o.value, o.label])), [bdmOptions]);
+
+  const visibleDoctors = useMemo(() => {
+    const data = doctors.data || [];
+    if (tab === 'assigned') return data.filter((d) => d.assignedTo);
+    if (tab === 'byBdm' && !byBdmFilter) return [];
+    return data;
+  }, [doctors.data, tab, byBdmFilter]);
+
+  const changeTab = (value) => { setTab(value); if (value !== 'byBdm') setByBdmFilter(null); };
 
   const [mode, setMode] = useState(null); // null | 'create'
   const [form, setForm] = useState(emptyForm);
@@ -122,6 +153,20 @@ export default function DoctorAssignmentScreen({ navigation }) {
         </Pressable>
       </View>
 
+      <View style={styles.tabRow}>
+        {TABS.map((t) => (
+          <Pressable key={t.value} onPress={() => changeTab(t.value)} style={[styles.tab, tab === t.value && styles.tabActive]}>
+            <Text style={[styles.tabText, tab === t.value && styles.tabTextActive]}>{t.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {tab === 'byBdm' && (
+        <View style={styles.byBdmRow}>
+          <SelectField value={byBdmFilter} onChange={setByBdmFilter} options={bdmOptions} placeholder="Choose a BDM to filter by" />
+        </View>
+      )}
+
       {mode === 'create' && (
         <Card style={styles.formCard}>
           <FormField label="Doctor name" value={form.name} onChangeText={(v) => setForm((f) => ({ ...f, name: v }))} placeholder="e.g. Dr. Sanjay Mehta" />
@@ -150,9 +195,16 @@ export default function DoctorAssignmentScreen({ navigation }) {
 
       <FlatList
         contentContainerStyle={styles.list}
-        data={doctors.data || []}
+        data={visibleDoctors}
         keyExtractor={(item) => item._id}
-        ListEmptyComponent={doctors.status === 'success' ? <EmptyState icon={Stethoscope} title="No doctors found" /> : null}
+        ListEmptyComponent={
+          doctors.status === 'success' ? (
+            <EmptyState
+              icon={Stethoscope}
+              title={tab === 'byBdm' && !byBdmFilter ? 'Choose a BDM to see their doctors' : 'No doctors found'}
+            />
+          ) : null
+        }
         renderItem={({ item }) => (
           <Card style={styles.row}>
             <Pressable onPress={() => selectMode && toggleSelected(item._id)} style={styles.rowTop}>
@@ -196,6 +248,12 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: 'row', gap: spacing.sm },
   headerBtn: { flex: 1 },
   selectToggle: { fontSize: 12, color: colors.primary, fontWeight: '600' },
+  tabRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
+  tab: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radii.pill, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.card },
+  tabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  tabText: { fontSize: 12, fontWeight: '600', color: colors.muted },
+  tabTextActive: { color: colors.white },
+  byBdmRow: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
   formCard: { marginHorizontal: spacing.lg, marginBottom: spacing.sm, gap: spacing.sm },
   bulkCard: { marginHorizontal: spacing.lg, marginBottom: spacing.sm, gap: spacing.sm },
   list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg, gap: spacing.sm },

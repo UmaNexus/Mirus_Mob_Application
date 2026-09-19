@@ -21,13 +21,17 @@ export const create = (payload) => api.post('/doctors', payload).then((res) => r
 export const update = (id, payload) => api.patch(`/doctors/${id}`, payload).then((res) => res.data.doctor);
 
 /**
- * `file` is a { uri, name, mimeType } object as returned by
+ * `file` is a { uri, name, mimeType, file? } object as returned by
  * expo-document-picker. Preview only parses/validates — nothing is written.
  */
 export const previewImport = (file) => {
   const form = new FormData();
-  form.append('roster', { uri: file.uri, name: file.name || 'roster.xlsx', type: file.mimeType || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  return api.post('/doctors/import/preview', form, { headers: { 'Content-Type': 'multipart/form-data' } }).then((res) => res.data);
+  if (file.file) {
+    form.append('roster', file.file, file.name || 'roster.xlsx');
+  } else {
+    form.append('roster', { uri: file.uri, name: file.name || 'roster.xlsx', type: file.mimeType || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  }
+  return api.post('/doctors/import/preview', form).then((res) => res.data);
 };
 
 /** `rows` is the (optionally user-trimmed) array of rows returned by previewImport. */

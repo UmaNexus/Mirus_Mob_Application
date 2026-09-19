@@ -316,3 +316,242 @@ export const getMonitor = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * GET /api/field-force/team-performance?month=YYYY-MM — the same DCR/MTP
+ * computation `getMonitor` already does, broken out per BDM instead of
+ * summed across the whole subtree, for the manager "Team" screen's
+ * per-person performance cards. Scoped identically to `getMonitor` (own
+ * reporting subtree, or company-wide for admin/superadmin) — never a
+ * company-wide BDM list for a tiered manager.
+ *
+ * `status` is a derived at-a-glance classification, computed here and never
+ * stored: dcrRate >=85 -> 'top', >=65 -> 'active', >=45 -> 'review', else
+ * 'low'. 'top'/'active' count as "on target"; 'review'/'low' count as
+ * "needs review" in `summary`. These thresholds are a presentation choice
+ * (no pre-existing business rule defines them) — documented here as the
+ * single source of truth rather than duplicated in the mobile client.
+ */
+export const getTeamPerformance = asyncHandler(async (req, res) => {
+  const companyWide = hasCompanyWideFieldOpsAccess(req.user);
+  let teamMemberFilter = { 'employeeDetails.fieldForce.tier': 'BDM' };
+  if (!companyWide) {
+    const subtree = [...(await buildReportingSubtreeIds(req.user._id))];
+    teamMemberFilter = { _id: { $in: subtree }, 'employeeDetails.fieldForce.tier': 'BDM' };
+  }
+
+  const month = String(req.query.month || currentMonth());
+  const [year, monthNumber] = month.split('-').map(Number);
+  const workingDays = getWorkingDaysInMonth(year, monthNumber);
+  const today = todayKey();
+  const elapsedWorkingDays = workingDays.filter((d) => d <= today);
+  const targetWorkingDays = elapsedWorkingDays.length > 0 ? elapsedWorkingDays : workingDays;
+
+  const bdms = await User.find(teamMemberFilter)
+    .select('personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce employeeDetails.employeeId isActive')
+    .lean();
+
+  const data = await Promise.all(bdms.map(async (bdm) => {
+    const [submittedDcrDays, visitDays, approvedPlans] = await Promise.all([
+      getSubmittedDcrDays(bdm._id, targetWorkingDays),
+      DailyCallReport.distinct('dateKey', { userId: bdm._id, dateKey: { $gte: `${month}-01`, $lte: `${month}-31` }, type: { $ne: 'missed' } }),
+      MonthlyTourPlan.find({ userId: bdm._id, month, status: 'approved' }).select('plannedVisits').lean()
+    ]);
+
+    const dcrRate = targetWorkingDays.length > 0
+      ? Math.min(100, Math.round((submittedDcrDays.length / targetWorkingDays.length) * 100))
+      : 0;
+
+    let totalPlannedVisits = 0;
+    approvedPlans.forEach((plan) => { totalPlannedVisits += plan.plannedVisits?.length || 0; });
+    let mtpAdherence = 0;
+    if (totalPlannedVisits > 0) {
+      // eslint-disable-next-line no-await-in-loop
+      const matchingVisits = await DailyCallReport.countDocuments({
+        userId: bdm._id, dateKey: { $gte: `${month}-01`, $lte: `${month}-31` }, type: { $ne: 'missed' }
+      });
+      mtpAdherence = Math.min(100, Math.round((matchingVisits / totalPlannedVisits) * 100));
+    } else if (approvedPlans.length > 0) {
+      mtpAdherence = 100;
+    }
+
+    let status;
+    if (dcrRate >= 85) status = 'top';
+    else if (dcrRate >= 65) status = 'active';
+    else if (dcrRate >= 45) status = 'review';
+    else status = 'low';
+
+    return {
+      userId: bdm._id,
+      name: `${bdm.personalDetails?.firstName || ''} ${bdm.personalDetails?.lastName || ''}`.trim(),
+      employeeId: bdm.employeeDetails?.employeeId || null,
+      territory: bdm.employeeDetails?.fieldForce?.territory || null,
+      isActive: Boolean(bdm.isActive),
+      dcrRate,
+      mtpAdherence,
+      visitDays: visitDays.length,
+      workingDays: targetWorkingDays.length,
+      status
+    };
+  }));
+
+  const summary = {
+    totalBdms: data.length,
+    onTarget: data.filter((d) => d.status === 'top' || d.status === 'active').length,
+    needsReview: data.filter((d) => d.status === 'review' || d.status === 'low').length
+  };
+
+  res.status(200).json({ success: true, month, summary, data });
+});
+
+/**
+ * GET /api/field-force/team-attendance?period=today|week|month — the
+ * caller's own reporting subtree's BDM attendance, scoped identically to
+ * `getMonitor`/`getTeamPerformance` (own subtree, or company-wide for
+ * admin/superadmin) — a manager can never see a BDM outside their own
+ * hierarchy. Reuses the existing Attendance + LeaveRequest models and the
+ * same "no punch record + an active approved leave = Leave" derivation
+ * `getTodayAttendance` already uses for a single caller — no new collection.
+ *
+ * `period=today` returns each BDM's real-time punch status; `week`/`month`
+ * return a present-days-in-range count instead (a live "punched in" state
+ * doesn't carry meaning over a multi-day range). `monthlySummary` is always
+ * the current month regardless of the selected period, matching the
+ * prototype's fixed "Monthly Summary" section.
+ */
+export const getTeamAttendance = asyncHandler(async (req, res) => {
+  const companyWide = hasCompanyWideFieldOpsAccess(req.user);
+  let teamMemberFilter = { 'employeeDetails.fieldForce.tier': 'BDM' };
+  if (!companyWide) {
+    const subtree = [...(await buildReportingSubtreeIds(req.user._id))];
+    teamMemberFilter = { _id: { $in: subtree }, 'employeeDetails.fieldForce.tier': 'BDM' };
+  }
+
+  const period = ['today', 'week', 'month'].includes(req.query.period) ? req.query.period : 'today';
+  const bdms = await User.find(teamMemberFilter)
+    .select('personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce employeeDetails.employeeId')
+    .lean();
+  const bdmIds = bdms.map((u) => u._id);
+
+  const now = new Date();
+  const today = todayKey();
+  const todayStart = new Date(`${today}T00:00:00.000Z`);
+  const todayEnd = new Date(`${today}T23:59:59.999Z`);
+
+  let rangeStart;
+  if (period === 'week') {
+    const day = now.getUTCDay(); // 0 = Sunday
+    const diffToMonday = (day + 6) % 7;
+    rangeStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - diffToMonday));
+  } else if (period === 'month') {
+    rangeStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  } else {
+    rangeStart = todayStart;
+  }
+  const rangeEnd = todayEnd;
+
+  const [todayRecords, rangeRecords, activeLeaves] = await Promise.all([
+    Attendance.find({ userId: { $in: bdmIds }, dateKey: today }).select('userId punchInAt punchOutAt status'),
+    Attendance.find({ userId: { $in: bdmIds }, date: { $gte: rangeStart, $lte: rangeEnd } }).select('userId dateKey status punchInAt'),
+    LeaveRequest.find({ userId: { $in: bdmIds }, status: 'Approved', fromDate: { $lte: todayEnd }, toDate: { $gte: todayStart } }).select('userId')
+  ]);
+
+  const todayByUser = new Map(todayRecords.map((r) => [String(r.userId), r]));
+  const leaveUserIds = new Set(activeLeaves.map((l) => String(l.userId)));
+  const rangeByUser = new Map();
+  rangeRecords.forEach((r) => {
+    const key = String(r.userId);
+    if (!rangeByUser.has(key)) rangeByUser.set(key, []);
+    rangeByUser.get(key).push(r);
+  });
+
+  const workingDaysInRange = [];
+  for (let cur = new Date(rangeStart); cur <= rangeEnd; cur.setUTCDate(cur.getUTCDate() + 1)) {
+    const wd = cur.getUTCDay();
+    if (wd >= 1 && wd <= 5) workingDaysInRange.push(dateKeyOf(cur));
+  }
+
+  const rows = bdms.map((bdm) => {
+    const id = String(bdm._id);
+    const name = `${bdm.personalDetails?.firstName || ''} ${bdm.personalDetails?.lastName || ''}`.trim();
+    const employeeId = bdm.employeeDetails?.employeeId || null;
+    const territory = bdm.employeeDetails?.fieldForce?.territory || null;
+    const onLeaveToday = leaveUserIds.has(id);
+
+    if (period === 'today') {
+      const todayRecord = todayByUser.get(id);
+      const punchedIn = Boolean(todayRecord?.punchInAt);
+      return {
+        userId: bdm._id, name, employeeId, territory,
+        status: onLeaveToday ? 'leave' : punchedIn ? 'in' : 'out',
+        punchInAt: todayRecord?.punchInAt || null,
+        punchOutAt: todayRecord?.punchOutAt || null
+      };
+    }
+
+    const periodRecords = rangeByUser.get(id) || [];
+    const presentDays = new Set(
+      periodRecords.filter((r) => r.status === 'Present' || r.punchInAt).map((r) => r.dateKey)
+    ).size;
+    return {
+      userId: bdm._id, name, employeeId, territory,
+      status: onLeaveToday ? 'leave' : null,
+      presentDays,
+      workingDays: workingDaysInRange.length
+    };
+  });
+
+  const summary = {
+    totalBdms: bdms.length,
+    punchedIn: rows.filter((r) => r.status === 'in').length,
+    notIn: period === 'today'
+      ? rows.filter((r) => r.status === 'out').length
+      : rows.filter((r) => !r.status && r.presentDays === 0).length,
+    onLeave: rows.filter((r) => r.status === 'leave').length
+  };
+
+  // Monthly summary — always the current month, independent of the
+  // selected period tab (mirrors the prototype's fixed section).
+  const monthKeyStr = today.slice(0, 7);
+  const monthStart = new Date(`${monthKeyStr}-01T00:00:00.000Z`);
+  const monthRecords = await Attendance.find({
+    userId: { $in: bdmIds }, date: { $gte: monthStart, $lte: todayEnd }
+  }).select('userId dateKey status punchInAt');
+  const [monthYear, monthNum] = monthKeyStr.split('-').map(Number);
+  const workingDaysThisMonth = getWorkingDaysInMonth(monthYear, monthNum).filter((d) => d <= today);
+
+  const punchMinutes = [];
+  let presentDayTotal = 0;
+  monthRecords.forEach((r) => {
+    if (r.status === 'Present' || r.punchInAt) {
+      presentDayTotal += 1;
+      if (r.punchInAt) {
+        const d = new Date(r.punchInAt);
+        punchMinutes.push((d.getUTCHours() * 60) + d.getUTCMinutes());
+      }
+    }
+  });
+  const avgPunchInMinutes = punchMinutes.length
+    ? Math.round(punchMinutes.reduce((a, b) => a + b, 0) / punchMinutes.length)
+    : null;
+  const avgPunchInTime = avgPunchInMinutes == null ? null
+    : `${String(Math.floor(avgPunchInMinutes / 60) % 24).padStart(2, '0')}:${String(avgPunchInMinutes % 60).padStart(2, '0')}`;
+
+  const [absentWithoutReason, onApprovedLeave] = await Promise.all([
+    Attendance.countDocuments({ userId: { $in: bdmIds }, dateKey: { $in: workingDaysThisMonth }, status: 'Absent' }),
+    LeaveRequest.countDocuments({
+      userId: { $in: bdmIds }, status: 'Approved', fromDate: { $lte: todayEnd }, toDate: { $gte: monthStart }
+    })
+  ]);
+
+  const monthlySummary = {
+    month: monthKeyStr,
+    avgPunchInTime,
+    presentDaysAvg: bdmIds.length > 0 ? Math.round((presentDayTotal / bdmIds.length) * 10) / 10 : 0,
+    workingDaysThisMonth: workingDaysThisMonth.length,
+    absentWithoutReason,
+    onApprovedLeave
+  };
+
+  res.status(200).json({ success: true, period, summary, rows, monthlySummary });
+});
+

@@ -169,9 +169,21 @@ export const listMyDcr = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data: dcrs });
 });
 
+const todayKey = () => dateKeyOf(new Date());
+
 /**
  * GET /api/dcr/team — ASM+ read-only view of their reporting subtree's calls
- * (organizational scope), or company-wide for admin/superadmin.
+ * (organizational scope), or company-wide for admin/superadmin. Powers both
+ * the Manager DCR Review list and detail screens off a single call: rows
+ * already carry everything a detail view needs (doctor, area, type,
+ * products, samples, feedback, start/end time, status, submittedAt), so the
+ * client groups these same rows by BDM+dateKey for the list summary instead
+ * of a second endpoint duplicating that logic.
+ *
+ * `period` (today|week|month, default 'today') filters by dateKey range —
+ * the same today/week/month convention as getTeamAttendance. An explicit
+ * `date` query param (exact dateKey match) takes precedence over `period`,
+ * preserving the endpoint's original single-day lookup for existing callers.
  */
 export const listTeamDcr = asyncHandler(async (req, res) => {
   const filter = {};
@@ -182,13 +194,28 @@ export const listTeamDcr = asyncHandler(async (req, res) => {
     if (!mongoose.isValidObjectId(req.query.userId)) throw new ApiError(400, 'Invalid userId');
     filter.userId = req.query.userId;
   }
-  if (req.query.date) filter.dateKey = String(req.query.date);
+
+  if (req.query.date) {
+    filter.dateKey = String(req.query.date);
+  } else {
+    const period = ['today', 'week', 'month'].includes(req.query.period) ? req.query.period : 'today';
+    const today = todayKey();
+    let startKey = today;
+    if (period === 'week') {
+      const now = new Date();
+      const diffToMonday = (now.getUTCDay() + 6) % 7;
+      startKey = dateKeyOf(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - diffToMonday)));
+    } else if (period === 'month') {
+      startKey = `${today.slice(0, 7)}-01`;
+    }
+    filter.dateKey = { $gte: startKey, $lte: today };
+  }
   if (req.query.type) filter.type = req.query.type;
 
   const dcrs = await DailyCallReport.find(filter)
     .populate('doctorId', DOCTOR_SELECT)
-    .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce')
-    .sort({ visitTime: -1 })
+    .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce employeeDetails.employeeId')
+    .sort({ dateKey: -1, visitTime: -1 })
     .limit(2000);
   res.status(200).json({ success: true, data: dcrs });
 });

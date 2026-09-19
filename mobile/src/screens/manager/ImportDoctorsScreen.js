@@ -44,7 +44,11 @@ export default function ImportDoctorsScreen({ navigation }) {
     });
     if (!picked.canceled && picked.assets?.[0]) {
       const asset = picked.assets[0];
-      setFile({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType });
+      // On Expo Web, expo-document-picker also returns a real browser `File`
+      // in `asset.file` — the browser's native FormData needs that object
+      // directly; the {uri, name, mimeType} shape below only works with
+      // React Native's FormData polyfill on iOS/Android.
+      setFile({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType, file: asset.file });
     }
   };
 
@@ -111,7 +115,7 @@ export default function ImportDoctorsScreen({ navigation }) {
                 <View key={row.row} style={styles.rowItem}>
                   <RowIcon size={iconSizes.card} color={STATUS_COLOR[row.status]} style={styles.rowIcon} />
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.rowTitle}>Row {row.row} — {row.name || '(no name)'} · {STATUS_LABEL[row.status]}</Text>
+                    <Text style={styles.rowTitle}>Row {row.row} - {row.name || '(no name)'} · {STATUS_LABEL[row.status]}</Text>
                     <Text style={[styles.rowMessage, { color: STATUS_COLOR[row.status] }]}>{row.message}</Text>
                   </View>
                 </View>
