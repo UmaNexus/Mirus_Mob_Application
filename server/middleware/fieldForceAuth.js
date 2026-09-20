@@ -167,6 +167,34 @@ export const buildReportingChainAbove = async (userId, { maxDepth = 8 } = {}) =>
   return chain;
 };
 
+/**
+ * True if making `candidateManagerId` the reporting manager of `userId`
+ * would create a cycle — i.e. `userId` is themselves already somewhere in
+ * `candidateManagerId`'s own upward chain (including being the same
+ * person). Walks `reportingManagerId` upward from the *candidate*, the same
+ * direction as `buildReportingChainAbove`, since the new edge from `userId`
+ * to `candidateManagerId` hasn't been saved yet and so can't be walked from
+ * `userId` itself.
+ */
+export const wouldCreateCycle = async (userId, candidateManagerId, { maxDepth = 10 } = {}) => {
+  const userIdStr = String(userId);
+  let currentId = String(candidateManagerId);
+  const seen = new Set();
+  let depth = 0;
+
+  while (currentId && depth < maxDepth) {
+    if (currentId === userIdStr) return true;
+    if (seen.has(currentId)) return true; // a pre-existing cycle upstream — never safe to attach to
+    seen.add(currentId);
+    // eslint-disable-next-line no-await-in-loop
+    const current = await User.findById(currentId).select('employeeDetails.reportingManagerId').lean();
+    const nextId = current?.employeeDetails?.reportingManagerId;
+    currentId = nextId ? String(nextId) : null;
+    depth += 1;
+  }
+  return false;
+};
+
 const PARTICIPANT_SELECT = 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce';
 // The fixed hierarchy's manager tiers — never Admin (no fieldForce.tier of
 // their own) and never BDM (that is the "OTHERS" bucket, not a manager).

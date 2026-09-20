@@ -2,9 +2,13 @@ import User from '../models/User.js';
 import SalarySlip from '../models/SalarySlip.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { formatINR } from '../utils/money.js';
+import { buildReportingChainAbove } from '../middleware/fieldForceAuth.js';
+import { FIELD_TIER_LABELS } from '../config/fieldForce.js';
 
 const MONTHS = ['', 'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
+
+const chainMemberName = (u) => `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim() || u.email;
 
 /**
  * GET /api/self-service/overview — US 7.1
@@ -23,6 +27,35 @@ export const getHubOverview = asyncHandler(async (req, res) => {
   const docs = user.uploadedDocuments || [];
   const manager = user.employeeDetails?.reportingManagerId;
 
+  // Full upward reporting chain (immediate manager -> ... -> Admin/root),
+  // not just the one-level `reportingManager` string above. Reuses the same
+  // `employeeDetails.reportingManagerId` walk the mobile field-force
+  // joint-call eligibility check already uses (buildReportingChainAbove) —
+  // it works for ANY employee (tiered or not), is already tenant-scoped (the
+  // request's tenant context, not a client-supplied id), and already stops
+  // safely on a circular relationship instead of looping forever. This is
+  // the employee's own upward chain, never a manager's downward subtree.
+  const chainIds = [...(await buildReportingChainAbove(user._id))];
+  const chainUsers = chainIds.length
+    ? await User.find({ _id: { $in: chainIds } })
+      .select('personalDetails.firstName personalDetails.lastName email role employeeDetails.employeeId employeeDetails.designation employeeDetails.fieldForce.tier employeeDetails.fieldForce.territory')
+      .lean()
+    : [];
+  const chainById = new Map(chainUsers.map((u) => [String(u._id), u]));
+  const reportingChain = chainIds
+    .map((id) => chainById.get(id))
+    .filter(Boolean)
+    .map((u) => ({
+      id: u._id,
+      name: chainMemberName(u),
+      employeeId: u.employeeDetails?.employeeId || null,
+      designation: u.employeeDetails?.designation || null,
+      role: u.role,
+      fieldForceTier: u.employeeDetails?.fieldForce?.tier || null,
+      territory: u.employeeDetails?.fieldForce?.territory || null,
+      fieldForceTierLabel: u.employeeDetails?.fieldForce?.tier ? (FIELD_TIER_LABELS[u.employeeDetails.fieldForce.tier] || null) : null
+    }));
+
   res.status(200).json({
     success: true,
     profile: {
@@ -32,9 +65,11 @@ export const getHubOverview = asyncHandler(async (req, res) => {
       employeeId: user.employeeDetails?.employeeId || null,
       department: user.employeeDetails?.department || null,
       status: user.isActive ? 'Active Employee' : 'Inactive',
+      fieldForceTier: user.employeeDetails?.fieldForce?.tier || null,
       reportingManager: manager
         ? `${manager.personalDetails.firstName} ${manager.personalDetails.lastName}`
-        : null
+        : null,
+      reportingChain
     },
     onboarding: { stage: user.onboardingStage },
     latestPayslip: latest
