@@ -141,7 +141,15 @@ export default function TimeField({ label, value, onChange, placeholder = 'Selec
                   value={draft}
                   mode="time"
                   display="spinner"
-                  onChange={(event, selected) => { if (selected) setDraft(selected); }}
+                  // `onChange` is deprecated as of @react-native-community/datetimepicker
+                  // v9 (see its index.d.ts) — the library's rewritten native side no
+                  // longer fires it on every wheel tick for an inline `display="spinner"`
+                  // picker (only on the old dialog's terminal set/dismiss/neutral events,
+                  // which this embedded style never reaches), so `draft` never updated —
+                  // the wheel visibly spun but the selected value was silently dropped.
+                  // `onValueChange` is the supported replacement that fires on every
+                  // actual value change, on both platforms.
+                  onValueChange={(event, selectedDate) => setDraft(selectedDate)}
                   style={styles.nativeSpinner}
                 />
               )
