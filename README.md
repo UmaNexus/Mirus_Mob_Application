@@ -98,6 +98,8 @@ Additional seeded employees (company `mirus`, password `Password1`):
 > the platform superadmin + one company admin from CLI flags (or an interactive
 > prompt). SMTP can be configured during setup or later under **Company Settings**.
 >
+
+
 > `npm run db:seed:admin` is a lighter non-interactive bootstrap (company code
 > `mirus`, `admin@mirus.com` / `ChangeMe!123`) without the demo dataset.
 

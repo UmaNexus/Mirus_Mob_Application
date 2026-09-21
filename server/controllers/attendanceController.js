@@ -582,8 +582,8 @@ export const cancelLeave = asyncHandler(async (req, res) => {
   const leave = await LeaveRequest.findById(req.params.id);
   if (!leave) throw new ApiError(404, 'Leave request not found');
   if (String(leave.userId) !== String(req.user._id)) throw new ApiError(403, 'You can only cancel your own leave');
-  if (!['Pending', 'Approved'].includes(leave.status)) {
-    throw new ApiError(400, 'Only pending or approved leave can be cancelled');
+  if (leave.status !== 'Pending') {
+  throw new ApiError(400, 'Only pending leave can be cancelled');
   }
 
   const prevStatus = leave.status;
