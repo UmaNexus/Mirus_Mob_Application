@@ -127,11 +127,56 @@ export default function MtpScreen({ navigation }) {
   );
 }
 
+/**
+ * Renders one calendar week (7 equal-width cells) — every column is a plain
+ * `flex: 1` child, so column width is always (container width - gaps) / 7,
+ * whatever that container width actually is (phone or Expo Web) — never a
+ * fixed/hardcoded pixel or percentage value that can round unevenly.
+ */
+function WeekRow({ week, month, treatmentFor, holidayDates }) {
+  return (
+    <View style={styles.weekRow}>
+      {week.map((day, dayIdx) => {
+        if (!day) return <View key={`blank-${dayIdx}`} style={styles.cell} />;
+        const dateKey = `${month}-${String(day).padStart(2, '0')}`;
+        const t = treatmentFor(dateKey);
+        const isEdge = t && (t.edge === 'start' || t.edge === 'end' || t.edge === 'both');
+        const weekend = isWeekend(dateKey);
+        const holiday = holidayDates?.has(dateKey);
+        return (
+          <View
+            key={dateKey}
+            style={[
+              styles.cell, styles.dayCell,
+              t && { backgroundColor: t.soft },
+              isEdge && { backgroundColor: t.solid },
+              weekend && !t && styles.weekendCell,
+              holiday && styles.holidayCell
+            ]}
+          >
+            <Text style={[styles.dayText, isEdge && styles.dayTextOnSolid, weekend && !isEdge && styles.weekendText, holiday && !isEdge && styles.holidayText]}>{day}</Text>
+            {t?.edge !== 'mid' && t?.edge !== 'end' && t && (
+              <Text style={[styles.areaTag, isEdge && styles.areaTagOnSolid]} numberOfLines={1} ellipsizeMode="tail">{t.area}</Text>
+            )}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 function CalendarGrid({ month, blocks, holidayDates }) {
   const [year, m] = month.split('-').map(Number);
   const total = daysInMonth(year, m);
   const leading = firstWeekdayMonFirst(year, m);
   const cells = [...Array(leading).fill(null), ...Array.from({ length: total }, (_, i) => i + 1)];
+  // Pad the trailing edge so every row has exactly 7 cells (keeps the grid a
+  // clean rectangle of equal-width columns) — purely a rendering nicety,
+  // never affects which weekday any real day falls under.
+  const trailing = (7 - (cells.length % 7)) % 7;
+  const paddedCells = [...cells, ...Array(trailing).fill(null)];
+  const weeks = [];
+  for (let i = 0; i < paddedCells.length; i += 7) weeks.push(paddedCells.slice(i, i + 7));
 
   const treatmentFor = (dateKey) => {
     for (let i = 0; i < blocks.length; i += 1) {
@@ -153,31 +198,9 @@ function CalendarGrid({ month, blocks, holidayDates }) {
         ))}
       </View>
       <View style={styles.grid}>
-        {cells.map((day, idx) => {
-          if (!day) return <View key={`blank-${idx}`} style={styles.cell} />;
-          const dateKey = `${month}-${String(day).padStart(2, '0')}`;
-          const t = treatmentFor(dateKey);
-          const isEdge = t && (t.edge === 'start' || t.edge === 'end' || t.edge === 'both');
-          const weekend = isWeekend(dateKey);
-          const holiday = holidayDates?.has(dateKey);
-          return (
-            <View
-              key={dateKey}
-              style={[
-                styles.cell, styles.dayCell,
-                t && { backgroundColor: t.soft },
-                isEdge && { backgroundColor: t.solid },
-                weekend && !t && styles.weekendCell,
-                holiday && styles.holidayCell
-              ]}
-            >
-              <Text style={[styles.dayText, isEdge && styles.dayTextOnSolid, weekend && !isEdge && styles.weekendText, holiday && !isEdge && styles.holidayText]}>{day}</Text>
-              {t?.edge !== 'mid' && t?.edge !== 'end' && t && (
-                <Text style={[styles.areaTag, isEdge && styles.areaTagOnSolid]} numberOfLines={1}>{t.area}</Text>
-              )}
-            </View>
-          );
-        })}
+        {weeks.map((week, weekIdx) => (
+          <WeekRow key={weekIdx} week={week} month={month} treatmentFor={treatmentFor} holidayDates={holidayDates} />
+        ))}
       </View>
     </Card>
   );
@@ -188,12 +211,25 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: spacing.lg, paddingBottom: spacing.sm },
   list: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.sm },
 
+  // Every column below is a plain `flex: 1` sibling in a `flexDirection: 'row'`
+  // — width is always (card width - gaps) / 7, computed by the layout engine
+  // from whatever the calendar card's actual width is (phone or Expo Web),
+  // never a fixed/hardcoded pixel value or a `%` that has to fight `gap`.
   calendarCard: { marginBottom: spacing.md },
-  weekHeader: { flexDirection: 'row', flexWrap: 'wrap', gap: 2, marginBottom: spacing.xs },
-  weekHeaderText: { width: '13%', textAlign: 'center', fontSize: 11, fontWeight: '700', color: colors.muted },
+  weekHeader: { flexDirection: 'row', gap: spacing.xs, marginBottom: spacing.xs },
+  weekHeaderText: { flex: 1, textAlign: 'center', fontSize: 11, fontWeight: '700', color: colors.muted },
   weekendHeaderText: { color: colors.primary },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 2 },
-  cell: { width: '13%', aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderRadius: radii.sm, paddingHorizontal: 1 },
+  grid: { gap: spacing.xs },
+  weekRow: { flexDirection: 'row', gap: spacing.xs },
+  cell: {
+    flex: 1,
+    minHeight: 48, // a comfortable, stable touch target regardless of screen width
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: spacing.xs
+  },
   dayCell: {},
   dayText: { fontSize: 13, color: colors.ink },
   dayTextOnSolid: { color: colors.white, fontWeight: '700' },
@@ -201,7 +237,7 @@ const styles = StyleSheet.create({
   weekendText: { color: colors.muted },
   holidayCell: { backgroundColor: HOLIDAY_SOFT, borderWidth: 1, borderColor: HOLIDAY_COLOR, opacity: 1 },
   holidayText: { color: HOLIDAY_COLOR, fontWeight: '700' },
-  areaTag: { fontSize: 7, color: colors.ink, marginTop: 1 },
+  areaTag: { fontSize: 9, color: colors.ink, marginTop: 2, maxWidth: '100%' },
   areaTagOnSolid: { color: colors.white },
 
   createBtn: { marginBottom: spacing.md },
