@@ -3,6 +3,7 @@ import { View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform, Scro
 import { useAuth } from '../context/AuthContext';
 import Button from '../components/Button';
 import ErrorBanner from '../components/ErrorBanner';
+import BrandLogo from '../components/BrandLogo';
 import { colors, spacing, radii, typography } from '../theme';
 
 /**
@@ -36,8 +37,7 @@ export default function LoginScreen() {
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <Text style={styles.brand}>MIRUS</Text>
-        <Text style={styles.brandSub}>Med Sciences Private Limited</Text>
+        <BrandLogo variant="full" size={40} style={styles.logo} />
 
         <View style={styles.form}>
           <Text style={typography.label}>Company code</Text>
@@ -84,8 +84,7 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.white },
   container: { flexGrow: 1, justifyContent: 'center', padding: spacing.xl },
-  brand: { fontSize: 34, fontWeight: '900', color: colors.ink, textAlign: 'center', letterSpacing: 1 },
-  brandSub: { fontSize: 12, color: colors.primary, textAlign: 'center', marginTop: spacing.xs, marginBottom: spacing.xxl },
+  logo: { alignSelf: 'center', marginBottom: spacing.xxl },
   form: { gap: spacing.xs },
   spacedLabel: { marginTop: spacing.md },
   input: {

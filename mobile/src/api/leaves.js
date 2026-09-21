@@ -8,3 +8,6 @@ export const cancel = (id) => api.patch(`/leaves/${id}/cancel`).then((res) => re
 export const listPending = () => api.get('/leaves', { params: { status: 'Pending' } }).then((res) => res.data.data);
 export const decide = (id, status, note) => api.patch(`/leaves/${id}/decision`, { status, note }).then((res) => res.data.leave);
 
+/** Every leave request in the caller's scope (subtree, or company-wide for admin/superadmin), optionally filtered — for the Reports tab's Leave report. */
+export const listTeam = (params) => api.get('/leaves', { params }).then((res) => res.data.data);
+

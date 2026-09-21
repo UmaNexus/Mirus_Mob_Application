@@ -73,3 +73,18 @@ export const requirePermission = (permission) => (req, res, next) => {
   }
   next();
 };
+
+/**
+ * requireNonAdmin — guards self-service capabilities that every employee
+ * should have regardless of HRMS role or field-force tier (e.g. the mobile
+ * app's own punch in/out) — only Admin/superadmin are excluded, since they
+ * manage the organization rather than punch their own attendance here. Must
+ * run after verifyToken.
+ */
+export const requireNonAdmin = (req, res, next) => {
+  if (!req.user) return next(new ApiError(401, 'Authentication required'));
+  if (req.user.role === 'admin' || req.user.role === 'superadmin') {
+    return next(new ApiError(403, 'Admin accounts do not use self-service attendance punch'));
+  }
+  next();
+};

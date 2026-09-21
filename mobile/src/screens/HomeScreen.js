@@ -26,6 +26,8 @@ import Card from '../components/Card';
 import Button from '../components/Button';
 import LoadingView from '../components/LoadingView';
 import ErrorBanner from '../components/ErrorBanner';
+import PunchCard from '../components/PunchCard';
+import BrandLogo from '../components/BrandLogo';
 import { colors, spacing, typography } from '../theme';
 
 /**
@@ -81,18 +83,26 @@ export default function HomeScreen({ navigation }) {
         }
       >
         <Card style={styles.hero}>
-          <Text style={styles.heroName}>
-            {displayName(user)}
-          </Text>
+          <BrandLogo variant="mark" size={28} boxed />
+          <View style={styles.heroText}>
+            <Text style={styles.heroName}>
+              {displayName(user)}
+            </Text>
 
-          <Text style={styles.heroSub}>
-            {tier
-              ? `${tier} · ${
-                  user?.employeeDetails?.fieldForce?.territory || 'MIRUS'
-                }`
-              : 'MIRUS'}
-          </Text>
+            <Text style={styles.heroSub}>
+              {tier
+                ? `${tier} · ${
+                    user?.employeeDetails?.fieldForce?.territory || 'MIRUS'
+                  }`
+                : 'MIRUS'}
+            </Text>
+          </View>
         </Card>
+
+        {/* Every non-admin role reaches this screen (ASM/RSM/ZSM, or the
+            HR/plain-employee fallback) — Admin/superadmin never do, since
+            they're routed to the Executive tab bar instead. */}
+        <PunchCard />
 
         {isManager && (
           <>
@@ -415,7 +425,14 @@ const styles = StyleSheet.create({
   },
 
   hero: {
-    backgroundColor: colors.ink
+    backgroundColor: colors.ink,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md
+  },
+
+  heroText: {
+    flex: 1
   },
 
   heroName: {

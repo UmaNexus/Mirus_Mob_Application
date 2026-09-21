@@ -12,6 +12,7 @@ import User from '../models/User.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { paisaToRupees } from '../utils/money.js';
+import { FIELD_TIERS } from '../config/fieldForce.js';
 import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds, canAccessFieldOpsUser, buildReportingChainAbove, resolveJointCallParticipants } from '../middleware/fieldForceAuth.js';
 
 const dateKeyOf = (d) => new Date(d).toISOString().slice(0, 10);
@@ -45,6 +46,160 @@ const getSubmittedDcrDays = async (userId, workingDays) => {
   });
 
   return submittedDcrDays;
+};
+
+/**
+ * DCR rate for a GROUP of BDMs (% of working days on which each BDM
+ * submitted a DCR, averaged across the whole group) — the exact formula
+ * `getMonitor` used to compute inline, now shared with `getOrgSummary` and
+ * any other tier/subtree roll-up.
+ */
+const computeDcrRate = async (bdmIds, targetWorkingDays) => {
+  if (bdmIds.length === 0 || targetWorkingDays.length === 0) return 0;
+  const submittedDays = await DailyCallReport.find({
+    userId: { $in: bdmIds },
+    dateKey: { $in: targetWorkingDays },
+    submittedAt: { $ne: null }
+  }).select('userId dateKey').lean();
+
+  const uniqueBdmDays = new Set(submittedDays.map((r) => `${r.userId}_${r.dateKey}`)).size;
+  const totalExpectedDays = bdmIds.length * targetWorkingDays.length;
+  return totalExpectedDays > 0 ? Math.min(100, Math.round((uniqueBdmDays / totalExpectedDays) * 100)) : 0;
+};
+
+/**
+ * MTP adherence for a scope (% of an approved month's planned visits that
+ * have a matching DCR log) — the exact formula `getMonitor` used to compute
+ * inline, now shared with `getOrgSummary` and per-manager subtree roll-ups.
+ */
+const computeMtpAdherence = async (scopeFilter, month) => {
+  const approvedPlans = await MonthlyTourPlan.find({ ...scopeFilter, month, status: 'approved' }).select('plannedVisits').lean();
+  let totalPlannedVisits = 0;
+  approvedPlans.forEach((plan) => { totalPlannedVisits += plan.plannedVisits?.length || 0; });
+
+  if (totalPlannedVisits > 0) {
+    const matchingVisits = await DailyCallReport.countDocuments({
+      ...scopeFilter,
+      dateKey: { $gte: `${month}-01`, $lte: `${month}-31` },
+      type: { $ne: 'missed' }
+    });
+    return Math.min(100, Math.round((matchingVisits / totalPlannedVisits) * 100));
+  }
+  return approvedPlans.length > 0 ? 100 : 0;
+};
+
+/**
+ * One BDM's own DCR/MTP/visit performance snapshot — the exact per-BDM
+ * computation `getTeamPerformance` used to do inline, now shared with the
+ * `tier-directory` drill-down so a BDM row looks identical whether it comes
+ * from the flat "My Team" list or a nested NSM/Admin drill-down.
+ */
+const computeBdmPerformance = async (bdmId, month, targetWorkingDays) => {
+  const [submittedDcrDays, visitDays, approvedPlans] = await Promise.all([
+    getSubmittedDcrDays(bdmId, targetWorkingDays),
+    DailyCallReport.distinct('dateKey', { userId: bdmId, dateKey: { $gte: `${month}-01`, $lte: `${month}-31` }, type: { $ne: 'missed' } }),
+    MonthlyTourPlan.find({ userId: bdmId, month, status: 'approved' }).select('plannedVisits').lean()
+  ]);
+
+  const dcrRate = targetWorkingDays.length > 0
+    ? Math.min(100, Math.round((submittedDcrDays.length / targetWorkingDays.length) * 100))
+    : 0;
+
+  let totalPlannedVisits = 0;
+  approvedPlans.forEach((plan) => { totalPlannedVisits += plan.plannedVisits?.length || 0; });
+  let mtpAdherence = 0;
+  if (totalPlannedVisits > 0) {
+    const matchingVisits = await DailyCallReport.countDocuments({
+      userId: bdmId, dateKey: { $gte: `${month}-01`, $lte: `${month}-31` }, type: { $ne: 'missed' }
+    });
+    mtpAdherence = Math.min(100, Math.round((matchingVisits / totalPlannedVisits) * 100));
+  } else if (approvedPlans.length > 0) {
+    mtpAdherence = 100;
+  }
+
+  let status;
+  if (dcrRate >= 85) status = 'top';
+  else if (dcrRate >= 65) status = 'active';
+  else if (dcrRate >= 45) status = 'review';
+  else status = 'low';
+
+  return { dcrRate, mtpAdherence, visitDays: visitDays.length, workingDays: targetWorkingDays.length, status };
+};
+
+/**
+ * % of a scope's assigned doctors who received at least one DCR visit within
+ * [startKey, endKey] — a genuinely computable "doctor coverage" metric from
+ * existing `Doctor.assignedTo` + `DailyCallReport.doctorId`, shared by
+ * `getOrgSummary` and `getReportsSummary`.
+ */
+const computeDoctorCoveragePct = async (memberIds, startKey, endKey) => {
+  if (!memberIds.length) return 0;
+  const [assignedDoctors, visitedDoctorIds] = await Promise.all([
+    Doctor.find({ assignedTo: { $in: memberIds } }).select('_id').lean(),
+    DailyCallReport.distinct('doctorId', { userId: { $in: memberIds }, dateKey: { $gte: startKey, $lte: endKey }, doctorId: { $ne: null } })
+  ]);
+  const assignedIds = new Set(assignedDoctors.map((d) => String(d._id)));
+  if (assignedIds.size === 0) return 0;
+  let covered = 0;
+  visitedDoctorIds.forEach((id) => { if (assignedIds.has(String(id))) covered += 1; });
+  return Math.round((covered / assignedIds.size) * 100);
+};
+
+/**
+ * Resolve [startKey, endKey] date-key range for a Reports-tab period.
+ * `today`/`week`/`month` mirror the exact range logic already used by
+ * `dcrController.listTeamDcr`; `quarter`/`ytd` are new but follow the same
+ * pattern (a wider, still real, calendar range — never a hardcoded count).
+ */
+const resolvePeriodRange = (period) => {
+  const today = todayKey();
+  const now = new Date();
+  if (period === 'today') return { startKey: today, endKey: today };
+  if (period === 'week') {
+    const diffToMonday = (now.getUTCDay() + 6) % 7;
+    const startKey = dateKeyOf(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - diffToMonday)));
+    return { startKey, endKey: today };
+  }
+  if (period === 'quarter') {
+    const q = Math.floor(now.getUTCMonth() / 3);
+    const startKey = dateKeyOf(new Date(Date.UTC(now.getUTCFullYear(), q * 3, 1)));
+    return { startKey, endKey: today };
+  }
+  if (period === 'ytd') {
+    return { startKey: `${now.getUTCFullYear()}-01-01`, endKey: today };
+  }
+  return { startKey: `${today.slice(0, 7)}-01`, endKey: today }; // month (default)
+};
+
+/** The immediately preceding equivalent period, for a "vs previous period" comparison. */
+const resolvePreviousPeriodRange = (period, currentStartKey) => {
+  const start = new Date(`${currentStartKey}T00:00:00.000Z`);
+  if (period === 'today') {
+    const prev = dateKeyOf(new Date(start.getTime() - 86400000));
+    return { startKey: prev, endKey: prev };
+  }
+  if (period === 'week') {
+    return {
+      startKey: dateKeyOf(new Date(start.getTime() - 7 * 86400000)),
+      endKey: dateKeyOf(new Date(start.getTime() - 86400000))
+    };
+  }
+  if (period === 'quarter') {
+    return {
+      startKey: dateKeyOf(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() - 3, 1))),
+      endKey: dateKeyOf(new Date(start.getTime() - 86400000))
+    };
+  }
+  if (period === 'ytd') {
+    return {
+      startKey: dateKeyOf(new Date(Date.UTC(start.getUTCFullYear() - 1, 0, 1))),
+      endKey: dateKeyOf(new Date(Date.UTC(start.getUTCFullYear() - 1, 11, 31)))
+    };
+  }
+  return {
+    startKey: dateKeyOf(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() - 1, 1))),
+    endKey: dateKeyOf(new Date(start.getTime() - 86400000))
+  }; // month (default)
 };
 
 /**
@@ -254,8 +409,7 @@ export const getMonitor = asyncHandler(async (req, res) => {
     pendingMtp,
     approvedMtp,
     totalVisits,
-    pendingExpense,
-    approvedPlans
+    pendingExpense
   ] = await Promise.all([
     User.countDocuments(teamMemberFilter),
     User.countDocuments({ ...teamMemberFilter, 'employeeDetails.fieldForce.tier': 'BDM' }),
@@ -264,43 +418,15 @@ export const getMonitor = asyncHandler(async (req, res) => {
     MonthlyTourPlan.countDocuments({ ...scopeFilter, month, status: 'pending' }),
     MonthlyTourPlan.countDocuments({ ...scopeFilter, month, status: 'approved' }),
     DailyCallReport.countDocuments({ ...scopeFilter, dateKey: { $gte: `${month}-01`, $lte: `${month}-31` } }),
-    Expense.countDocuments({ ...scopeFilter, status: 'pending' }),
-    MonthlyTourPlan.find({ ...scopeFilter, month, status: 'approved' }).select('plannedVisits userId').lean()
+    Expense.countDocuments({ ...scopeFilter, status: 'pending' })
   ]);
 
   const bdmIds = bdmUsers.map((u) => u._id);
 
-  // DCR rate: % of working days on which BDMs submitted DCRs
-  let dcrRate = 0;
-  if (bdmIds.length > 0 && targetWorkingDays.length > 0) {
-    const submittedDays = await DailyCallReport.find({
-      userId: { $in: bdmIds },
-      dateKey: { $in: targetWorkingDays },
-      submittedAt: { $ne: null }
-    }).select('userId dateKey').lean();
-
-    const uniqueBdmDays = new Set(submittedDays.map((r) => `${r.userId}_${r.dateKey}`)).size;
-    const totalExpectedDays = bdmIds.length * targetWorkingDays.length;
-    dcrRate = totalExpectedDays > 0 ? Math.min(100, Math.round((uniqueBdmDays / totalExpectedDays) * 100)) : 0;
-  }
-
-  // MTP adherence: % of planned visits on approved MTPs that have DCR logs
-  let mtpAdherence = 0;
-  let totalPlannedVisits = 0;
-  approvedPlans.forEach((plan) => {
-    totalPlannedVisits += plan.plannedVisits?.length || 0;
-  });
-
-  if (totalPlannedVisits > 0) {
-    const matchingVisits = await DailyCallReport.countDocuments({
-      ...scopeFilter,
-      dateKey: { $gte: `${month}-01`, $lte: `${month}-31` },
-      type: { $ne: 'missed' }
-    });
-    mtpAdherence = Math.min(100, Math.round((matchingVisits / totalPlannedVisits) * 100));
-  } else if (approvedMtp > 0) {
-    mtpAdherence = 100;
-  }
+  const [dcrRate, mtpAdherence] = await Promise.all([
+    computeDcrRate(bdmIds, targetWorkingDays),
+    computeMtpAdherence(scopeFilter, month)
+  ]);
 
   const pendingMtpAll = pendingMtp > 0 ? pendingMtp : await MonthlyTourPlan.countDocuments({ ...scopeFilter, status: 'pending' });
 
@@ -356,46 +482,14 @@ export const getTeamPerformance = asyncHandler(async (req, res) => {
     .lean();
 
   const data = await Promise.all(bdms.map(async (bdm) => {
-    const [submittedDcrDays, visitDays, approvedPlans] = await Promise.all([
-      getSubmittedDcrDays(bdm._id, targetWorkingDays),
-      DailyCallReport.distinct('dateKey', { userId: bdm._id, dateKey: { $gte: `${month}-01`, $lte: `${month}-31` }, type: { $ne: 'missed' } }),
-      MonthlyTourPlan.find({ userId: bdm._id, month, status: 'approved' }).select('plannedVisits').lean()
-    ]);
-
-    const dcrRate = targetWorkingDays.length > 0
-      ? Math.min(100, Math.round((submittedDcrDays.length / targetWorkingDays.length) * 100))
-      : 0;
-
-    let totalPlannedVisits = 0;
-    approvedPlans.forEach((plan) => { totalPlannedVisits += plan.plannedVisits?.length || 0; });
-    let mtpAdherence = 0;
-    if (totalPlannedVisits > 0) {
-      // eslint-disable-next-line no-await-in-loop
-      const matchingVisits = await DailyCallReport.countDocuments({
-        userId: bdm._id, dateKey: { $gte: `${month}-01`, $lte: `${month}-31` }, type: { $ne: 'missed' }
-      });
-      mtpAdherence = Math.min(100, Math.round((matchingVisits / totalPlannedVisits) * 100));
-    } else if (approvedPlans.length > 0) {
-      mtpAdherence = 100;
-    }
-
-    let status;
-    if (dcrRate >= 85) status = 'top';
-    else if (dcrRate >= 65) status = 'active';
-    else if (dcrRate >= 45) status = 'review';
-    else status = 'low';
-
+    const perf = await computeBdmPerformance(bdm._id, month, targetWorkingDays);
     return {
       userId: bdm._id,
       name: `${bdm.personalDetails?.firstName || ''} ${bdm.personalDetails?.lastName || ''}`.trim(),
       employeeId: bdm.employeeDetails?.employeeId || null,
       territory: bdm.employeeDetails?.fieldForce?.territory || null,
       isActive: Boolean(bdm.isActive),
-      dcrRate,
-      mtpAdherence,
-      visitDays: visitDays.length,
-      workingDays: targetWorkingDays.length,
-      status
+      ...perf
     };
   }));
 
@@ -422,13 +516,23 @@ export const getTeamPerformance = asyncHandler(async (req, res) => {
  * doesn't carry meaning over a multi-day range). `monthlySummary` is always
  * the current month regardless of the selected period, matching the
  * prototype's fixed "Monthly Summary" section.
+ *
+ * `tier` (optional, one of FIELD_TIERS) generalizes this beyond BDM — an
+ * NSM/Admin executive screen can request `tier=ZSM`/`RSM`/`ASM`/`NSM` to see
+ * that tier's attendance across the caller's *whole* subtree (flat, not just
+ * direct reports). Omitting it defaults to `'BDM'`, the exact prior
+ * behavior, so every existing ASM/RSM/ZSM caller (which never passes this
+ * param) is unaffected. Response field names (`totalBdms`, etc.) are kept
+ * as-is regardless of the requested tier for backward compatibility with
+ * existing clients.
  */
 export const getTeamAttendance = asyncHandler(async (req, res) => {
   const companyWide = hasCompanyWideFieldOpsAccess(req.user);
-  let teamMemberFilter = { 'employeeDetails.fieldForce.tier': 'BDM' };
+  const tier = FIELD_TIERS.includes(req.query.tier) ? req.query.tier : 'BDM';
+  let teamMemberFilter = { 'employeeDetails.fieldForce.tier': tier };
   if (!companyWide) {
     const subtree = [...(await buildReportingSubtreeIds(req.user._id))];
-    teamMemberFilter = { _id: { $in: subtree }, 'employeeDetails.fieldForce.tier': 'BDM' };
+    teamMemberFilter = { _id: { $in: subtree }, 'employeeDetails.fieldForce.tier': tier };
   }
 
   const period = ['today', 'week', 'month'].includes(req.query.period) ? req.query.period : 'today';
@@ -557,6 +661,236 @@ export const getTeamAttendance = asyncHandler(async (req, res) => {
     onApprovedLeave
   };
 
-  res.status(200).json({ success: true, period, summary, rows, monthlySummary });
+  res.status(200).json({ success: true, period, tier, summary, rows, monthlySummary });
+});
+
+/**
+ * GET /api/field-force/org-summary?month=YYYY-MM — NSM/Admin executive Home
+ * screen. Scoped identically to `getMonitor` (own reporting subtree, or
+ * company-wide for admin/superadmin), but additionally breaks the scope down
+ * by tier (`tierCounts`) and adds attendance-today + doctor-coverage figures
+ * that a plain ASM/RSM/ZSM "my BDMs" monitor screen has no use for. Every
+ * figure is computed live — nothing here is hardcoded.
+ */
+export const getOrgSummary = asyncHandler(async (req, res) => {
+  const companyWide = hasCompanyWideFieldOpsAccess(req.user);
+  const scope = companyWide ? 'company' : 'subtree';
+
+  let allMemberIds;
+  if (companyWide) {
+    allMemberIds = (await User.find({ 'employeeDetails.fieldForce.tier': { $ne: null } }).select('_id').lean()).map((u) => String(u._id));
+  } else {
+    allMemberIds = [...(await buildReportingSubtreeIds(req.user._id))];
+  }
+
+  const month = String(req.query.month || currentMonth());
+  const [year, monthNumber] = month.split('-').map(Number);
+  const workingDays = getWorkingDaysInMonth(year, monthNumber);
+  const today = todayKey();
+  const elapsedWorkingDays = workingDays.filter((d) => d <= today);
+  const targetWorkingDays = elapsedWorkingDays.length > 0 ? elapsedWorkingDays : workingDays;
+
+  const memberFilter = { _id: { $in: allMemberIds } };
+  const scopeFilter = { userId: { $in: allMemberIds } };
+
+  const tierCountsAgg = await User.aggregate([
+    { $match: { _id: { $in: allMemberIds.map((id) => new mongoose.Types.ObjectId(id)) } } },
+    { $group: { _id: '$employeeDetails.fieldForce.tier', count: { $sum: 1 } } }
+  ]);
+  const tierCounts = {};
+  tierCountsAgg.forEach((row) => { if (row._id) tierCounts[row._id] = row.count; });
+
+  const bdmIds = (await User.find({ ...memberFilter, 'employeeDetails.fieldForce.tier': 'BDM' }).select('_id').lean()).map((u) => u._id);
+
+  const todayStart = new Date(`${today}T00:00:00.000Z`);
+  const todayEnd = new Date(`${today}T23:59:59.999Z`);
+
+  const [
+    dcrRate, mtpAdherence, pendingExpenseCount, pendingLeaveCount, pendingMtpCount,
+    todayAttendanceRecords, activeLeavesToday, doctorCoveragePct
+  ] = await Promise.all([
+    computeDcrRate(bdmIds, targetWorkingDays),
+    computeMtpAdherence(scopeFilter, month),
+    Expense.countDocuments({ ...scopeFilter, status: 'pending' }),
+    LeaveRequest.countDocuments({ ...scopeFilter, status: 'Pending' }),
+    MonthlyTourPlan.countDocuments({ ...scopeFilter, month, status: 'pending' }),
+    Attendance.find({ userId: { $in: allMemberIds }, dateKey: today }).select('userId punchInAt').lean(),
+    LeaveRequest.find({ userId: { $in: allMemberIds }, status: 'Approved', fromDate: { $lte: todayEnd }, toDate: { $gte: todayStart } }).select('userId').lean(),
+    computeDoctorCoveragePct(allMemberIds, `${month}-01`, `${month}-31`)
+  ]);
+
+  const leaveUserIds = new Set(activeLeavesToday.map((l) => String(l.userId)));
+  const punchedIn = todayAttendanceRecords.filter((r) => r.punchInAt && !leaveUserIds.has(String(r.userId))).length;
+  const onLeave = leaveUserIds.size;
+  const total = allMemberIds.length;
+  const notIn = Math.max(0, total - punchedIn - onLeave);
+
+  res.status(200).json({
+    success: true,
+    data: {
+      scope,
+      tierCounts,
+      attendanceToday: { punchedIn, notIn, onLeave, total },
+      dcrRate,
+      mtpAdherence,
+      pendingExpenseCount,
+      pendingLeaveCount,
+      pendingMtpCount,
+      doctorCoveragePct,
+      month
+    }
+  });
+});
+
+/**
+ * GET /api/field-force/tier-directory?tier=&managerId=&month= — the
+ * NSM/Admin executive Monitor tab's drill-down. Returns exactly one level of
+ * the hierarchy at a time (a manager's DIRECT reports only — never the whole
+ * subtree flattened), so the client can drill ZSM -> RSM -> ASM -> BDM (NSM)
+ * or NSM -> ZSM -> RSM -> ASM -> BDM (Admin) one tap at a time.
+ *
+ * `managerId` is always re-validated server-side against the caller's own
+ * authorized scope via `canAccessFieldOpsUser` — a client can never drill
+ * into a manager outside its own subtree by guessing an id.
+ */
+export const getTierDirectory = asyncHandler(async (req, res) => {
+  const { tier, managerId } = req.query;
+  if (managerId && !mongoose.isValidObjectId(managerId)) throw new ApiError(400, 'Invalid managerId');
+
+  const month = String(req.query.month || currentMonth());
+  const [year, monthNumber] = month.split('-').map(Number);
+  const workingDays = getWorkingDaysInMonth(year, monthNumber);
+  const today = todayKey();
+  const elapsedWorkingDays = workingDays.filter((d) => d <= today);
+  const targetWorkingDays = elapsedWorkingDays.length > 0 ? elapsedWorkingDays : workingDays;
+
+  const DIRECTORY_SELECT = 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce employeeDetails.employeeId isActive';
+  let directReports;
+
+  if (managerId) {
+    if (!(await canAccessFieldOpsUser(req.user, managerId))) {
+      throw new ApiError(403, 'You are not authorized to view this manager\'s team');
+    }
+    directReports = await User.find({ 'employeeDetails.reportingManagerId': managerId, deletedAt: null }).select(DIRECTORY_SELECT).lean();
+  } else if (hasCompanyWideFieldOpsAccess(req.user)) {
+    // Admin/superadmin with no managerId: the very top of the org — every
+    // user reporting directly to an Admin/superadmin (i.e. every NSM, or a
+    // manager onboarded directly under Admin).
+    const admins = await User.find({ role: { $in: ['admin', 'superadmin'] } }).select('_id').lean();
+    const adminIds = admins.map((a) => a._id);
+    directReports = await User.find({ 'employeeDetails.reportingManagerId': { $in: adminIds }, deletedAt: null }).select(DIRECTORY_SELECT).lean();
+  } else {
+    // NSM (or any tiered manager) with no managerId: their own direct reports.
+    directReports = await User.find({ 'employeeDetails.reportingManagerId': req.user._id, deletedAt: null }).select(DIRECTORY_SELECT).lean();
+  }
+
+  if (tier) {
+    directReports = directReports.filter((u) => u.employeeDetails?.fieldForce?.tier === tier);
+  }
+
+  const data = await Promise.all(directReports.map(async (u) => {
+    const rowTier = u.employeeDetails?.fieldForce?.tier || null;
+    const base = {
+      userId: u._id,
+      name: `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim(),
+      employeeId: u.employeeDetails?.employeeId || null,
+      territory: u.employeeDetails?.fieldForce?.territory || null,
+      tier: rowTier,
+      isActive: Boolean(u.isActive)
+    };
+
+    if (rowTier === 'BDM') {
+      const perf = await computeBdmPerformance(u._id, month, targetWorkingDays);
+      return { ...base, ...perf };
+    }
+
+    if (rowTier) {
+      const [directReportCount, childSubtree] = await Promise.all([
+        User.countDocuments({ 'employeeDetails.reportingManagerId': u._id, deletedAt: null }),
+        buildReportingSubtreeIds(u._id)
+      ]);
+      const childIds = [...childSubtree];
+      const childBdmIds = childIds.length
+        ? (await User.find({ _id: { $in: childIds }, 'employeeDetails.fieldForce.tier': 'BDM' }).select('_id').lean()).map((x) => x._id)
+        : [];
+      const childScopeFilter = { userId: { $in: childIds } };
+      const [dcrRate, mtpAdherence] = await Promise.all([
+        computeDcrRate(childBdmIds, targetWorkingDays),
+        computeMtpAdherence(childScopeFilter, month)
+      ]);
+      return { ...base, directReportCount, dcrRate, mtpAdherence };
+    }
+
+    return base;
+  }));
+
+  res.status(200).json({ success: true, month, managerId: managerId || null, data });
+});
+
+/**
+ * GET /api/field-force/reports-summary?period=today|week|month|quarter|ytd —
+ * the NSM/Admin Reports tab's period selector + "key numbers" block, plus
+ * the same computation for the immediately preceding equivalent period.
+ * Scoped identically to `getMonitor`. Individual report drill-down lists
+ * reuse the already-existing `/dcr/team`, `/mtp/team`, `/expenses/team`,
+ * `/leaves`, `/doctors`, `/stockists/team`, `/secondary-sales/team`
+ * endpoints directly — this endpoint only powers the summary numbers.
+ */
+export const getReportsSummary = asyncHandler(async (req, res) => {
+  const companyWide = hasCompanyWideFieldOpsAccess(req.user);
+  let scopeFilter = {};
+  let scopeMemberIds = [];
+  if (!companyWide) {
+    const subtree = [...(await buildReportingSubtreeIds(req.user._id))];
+    scopeFilter = { userId: { $in: subtree } };
+    scopeMemberIds = subtree;
+  } else {
+    scopeMemberIds = (await User.find({ 'employeeDetails.fieldForce.tier': { $ne: null } }).select('_id').lean()).map((u) => String(u._id));
+  }
+
+  const period = ['today', 'week', 'month', 'quarter', 'ytd'].includes(req.query.period) ? req.query.period : 'month';
+  const current = resolvePeriodRange(period);
+  const previous = resolvePreviousPeriodRange(period, current.startKey);
+
+  const computeForRange = async ({ startKey, endKey }) => {
+    const startDate = new Date(`${startKey}T00:00:00.000Z`);
+    const endDate = new Date(`${endKey}T23:59:59.999Z`);
+    const [dcrSubmittedCount, fieldVisitsCount, mtpApprovedCount, mtpPendingCount, expenses, leaveApprovedCount, leavePendingCount, secondarySales] = await Promise.all([
+      DailyCallReport.countDocuments({ ...scopeFilter, dateKey: { $gte: startKey, $lte: endKey }, submittedAt: { $ne: null } }),
+      DailyCallReport.countDocuments({ ...scopeFilter, dateKey: { $gte: startKey, $lte: endKey }, type: { $ne: 'missed' } }),
+      MonthlyTourPlan.countDocuments({ ...scopeFilter, status: 'approved', decidedAt: { $gte: startDate, $lte: endDate } }),
+      MonthlyTourPlan.countDocuments({ ...scopeFilter, status: 'pending' }),
+      Expense.find({ ...scopeFilter, date: { $gte: startDate, $lte: endDate } }).select('amount').lean(),
+      LeaveRequest.countDocuments({ ...scopeFilter, status: 'Approved', fromDate: { $lte: endDate }, toDate: { $gte: startDate } }),
+      LeaveRequest.countDocuments({ ...scopeFilter, status: 'Pending' }),
+      SecondarySale.find({ ...scopeFilter, createdAt: { $gte: startDate, $lte: endDate } }).select('value').lean()
+    ]);
+    const expenseTotalPaisa = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
+    const secondarySalesValuePaisa = secondarySales.reduce((sum, s) => sum + (s.value || 0), 0);
+    return {
+      dcrSubmittedCount,
+      fieldVisitsCount,
+      mtpApprovedCount,
+      mtpPendingCount,
+      expenseTotal: paisaToRupees(expenseTotalPaisa),
+      expenseClaimsCount: expenses.length,
+      leaveApprovedCount,
+      leavePendingCount,
+      secondarySalesValue: paisaToRupees(secondarySalesValuePaisa)
+    };
+  };
+
+  const [currentStats, previousStats, doctorCoveragePct] = await Promise.all([
+    computeForRange(current),
+    computeForRange(previous),
+    computeDoctorCoveragePct(scopeMemberIds, current.startKey, current.endKey)
+  ]);
+
+  res.status(200).json({
+    success: true,
+    period,
+    current: { ...currentStats, from: current.startKey, to: current.endKey, doctorCoveragePct },
+    previous: { ...previousStats, from: previous.startKey, to: previous.endKey }
+  });
 });
 

@@ -1,17 +1,19 @@
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, Linking, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LogOut, ClipboardList, CalendarDays, ChevronRight } from 'lucide-react-native';
+import { LogOut, CalendarDays, ChevronRight, UserCog } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { displayName, resolveUserTier } from '../../navigation/roleHelpers';
+import { WEB_APP_URL } from '../../config/webAppUrl';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
 import BrandLogo from '../../components/BrandLogo';
 import { colors, spacing, typography, iconSizes } from '../../theme';
 
-export default function ManagerMoreScreen({ navigation }) {
+export default function ExecutiveMoreScreen({ navigation }) {
   const { user, signOut } = useAuth();
   const tier = resolveUserTier(user);
+  const isAdmin = tier === 'ADMIN';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -23,13 +25,19 @@ export default function ManagerMoreScreen({ navigation }) {
 
         <Card style={styles.card}>
           <Text style={styles.name}>{displayName(user)}</Text>
-          <Text style={styles.role}>
-            {tier ? `${tier} · ${user?.employeeDetails?.fieldForce?.territory || 'MIRUS'}` : 'MIRUS'}
-          </Text>
+          <Text style={styles.role}>{isAdmin ? 'Admin · Company-wide' : `${tier} · ${user?.employeeDetails?.fieldForce?.territory || 'MIRUS'}`}</Text>
         </Card>
 
-        <NavRow icon={ClipboardList} title="DCR Review" subtitle="Review your team's submitted daily call reports" onPress={() => navigation.navigate('DcrReview')} />
         <NavRow icon={CalendarDays} title="Status Calendar" subtitle="Your holidays, leave, and attendance for the month" onPress={() => navigation.navigate('Calendar')} />
+
+        {isAdmin && (
+          <NavRow
+            icon={UserCog}
+            title="Manage Users / Role Assignment"
+            subtitle="Opens the HRMS admin dashboard in your browser"
+            onPress={() => Linking.openURL(`${WEB_APP_URL}/admin`)}
+          />
+        )}
 
         <Button icon={LogOut} title="Sign out" variant="outline" onPress={signOut} />
       </View>

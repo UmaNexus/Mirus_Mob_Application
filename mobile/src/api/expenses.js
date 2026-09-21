@@ -28,5 +28,8 @@ export const receiptUrl = (expenseId) => `${api.defaults.baseURL}/expenses/${exp
 
 export const listPending = () => api.get('/expenses/pending').then((res) => res.data.data);
 
+/** Every expense in the caller's scope (subtree, or company-wide for admin/superadmin), optionally filtered — for the Reports tab's Expense report. */
+export const listTeam = (params) => api.get('/expenses/team', { params }).then((res) => res.data.data);
+
 export const decide = (id, status, note) => api.patch(`/expenses/${id}/decision`, { status, note }).then((res) => res.data.expense);
 

@@ -13,9 +13,24 @@ test('unauthenticated request is rejected', async () => {
   assert.equal((await request(app).post('/api/attendance/punch-in')).status, 401);
 });
 
-test('an employee with no fieldForce tier cannot use the punch endpoints', async () => {
+test('a plain employee with no fieldForce tier CAN use the punch endpoints — only Admin/superadmin are excluded', async () => {
   const { agent } = await authAgent(app, { email: 'plain@xyz.com', role: 'employee' });
+  const res = await agent.post('/api/attendance/punch-in');
+  assert.equal(res.status, 200);
+  assert.ok(res.body.record.punchInAt);
+});
+
+test('HR can use the punch endpoints', async () => {
+  const { agent } = await authAgent(app, { email: 'hr-punch@xyz.com', role: 'hr' });
+  const res = await agent.post('/api/attendance/punch-in');
+  assert.equal(res.status, 200);
+});
+
+test('admin cannot use the punch endpoints', async () => {
+  const { agent } = await authAgent(app, { email: 'admin-punch@xyz.com', role: 'admin' });
   assert.equal((await agent.post('/api/attendance/punch-in')).status, 403);
+  assert.equal((await agent.post('/api/attendance/punch-out')).status, 403);
+  assert.equal((await agent.get('/api/attendance/today')).status, 403);
 });
 
 test('a BDM can punch in, see today\'s status, and punch out with worked hours computed', async () => {

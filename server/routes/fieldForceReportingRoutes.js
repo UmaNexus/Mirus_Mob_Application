@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import {
   getCalendar, getMyAlerts, getMyDashboard, getMonitor, getMyReportingChain, getJointCallParticipants,
-  getTeamPerformance, getTeamAttendance
+  getTeamPerformance, getTeamAttendance, getOrgSummary, getTierDirectory, getReportsSummary
 } from '../controllers/fieldForceReportingController.js';
 import { verifyToken } from '../middleware/authMiddleware.js';
 import { requireFieldTier, requireFieldCapability } from '../middleware/fieldForceAuth.js';
@@ -19,5 +19,12 @@ router.get('/dashboard', requireFieldTier('BDM'), getMyDashboard);
 router.get('/monitor', requireFieldCapability(PERMISSIONS.FIELDOPS_MONITOR, 'ASM'), getMonitor);
 router.get('/team-performance', requireFieldCapability(PERMISSIONS.FIELDOPS_MONITOR, 'ASM'), getTeamPerformance);
 router.get('/team-attendance', requireFieldCapability(PERMISSIONS.FIELDOPS_MONITOR, 'ASM'), getTeamAttendance);
+
+// NSM/Admin executive monitoring — same capability gate as the ASM+ endpoints
+// above; NSM already clears 'ASM' via tierAtLeast, admin/superadmin via their
+// existing FIELDOPS_MONITOR permission. Read-only: no approval/decision route.
+router.get('/org-summary', requireFieldCapability(PERMISSIONS.FIELDOPS_MONITOR, 'ASM'), getOrgSummary);
+router.get('/tier-directory', requireFieldCapability(PERMISSIONS.FIELDOPS_MONITOR, 'ASM'), getTierDirectory);
+router.get('/reports-summary', requireFieldCapability(PERMISSIONS.FIELDOPS_MONITOR, 'ASM'), getReportsSummary);
 
 export default router;
