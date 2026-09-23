@@ -15,7 +15,10 @@ const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || Constants.expoConfig?.ex
  */
 export const api = axios.create({
   baseURL: API_BASE_URL,
-  headers: { 'X-Client': 'mobile' },
+  headers: {
+    'X-Client': 'mobile',
+    'ngrok-skip-browser-warning': 'true'
+  },
   timeout: 15000
 });
 

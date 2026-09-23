@@ -8,16 +8,17 @@
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.mirus.fieldforce"
+      "bundleIdentifier": "com.umanexus.fieldforce"
     },
     "android": {
-      "package": "com.mirus.fieldforce",
+      "package": "com.umanexus.fieldforce",
+      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF"
       }
     },
     "extra": {
-      "apiBaseUrl": "http://localhost:5000/api"
+      "apiBaseUrl": "https://vince-multigranular-inflatedly.ngrok-free.dev/api"
     }
   }
 }
