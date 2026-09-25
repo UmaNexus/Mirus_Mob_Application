@@ -32,3 +32,16 @@ export const isManagerTier = (user) => {
   if (user.role === 'admin' || user.role === 'superadmin') return true;
   return ['ASM', 'RSM', 'ZSM', 'NSM'].includes(user.employeeDetails?.fieldForce?.tier);
 };
+
+/**
+ * True for the two executive, cross-tier MONITORING roles — NSM (whose
+ * scope is their whole ZSM->RSM->ASM->BDM subtree) and Admin/superadmin
+ * (company-wide). These get their own tab navigator (`ExecutiveTabNavigator`)
+ * instead of the operational ASM/RSM/ZSM "my direct-report BDMs" experience —
+ * see `RootNavigator`. Every underlying endpoint re-checks this server-side
+ * (`requireFieldCapability`), so this is a routing convenience only.
+ */
+export const isExecutiveTier = (user) => {
+  const tier = resolveUserTier(user);
+  return tier === 'NSM' || tier === 'ADMIN';
+};

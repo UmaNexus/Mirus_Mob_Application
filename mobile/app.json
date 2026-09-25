@@ -6,6 +6,11 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "assetBundlePatterns": ["**/*"],
+    "splash": {
+      "image": "./assets/logo-mirus-mark.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF"
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.umanexus.fieldforce"
@@ -17,8 +22,11 @@
         "backgroundColor": "#FFFFFF"
       }
     },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
     "extra": {
-      "apiBaseUrl": "https://vince-multigranular-inflatedly.ngrok-free.dev/api"
+      "apiBaseUrl": "http://localhost:5000/api"
     }
   }
 }

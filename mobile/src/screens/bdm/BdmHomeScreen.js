@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React from 'react';
 import { View, Text, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ClipboardList, CalendarDays, Receipt, ListChecks, AlertTriangle, Palmtree } from 'lucide-react-native';
@@ -14,6 +14,8 @@ import Button from '../../components/Button';
 import StatusBadge from '../../components/StatusBadge';
 import ErrorBanner from '../../components/ErrorBanner';
 import LoadingView from '../../components/LoadingView';
+import PunchCard from '../../components/PunchCard';
+import BrandLogo from '../../components/BrandLogo';
 import { colors, spacing, radii, typography } from '../../theme';
 
 /**
@@ -23,8 +25,6 @@ import { colors, spacing, radii, typography } from '../../theme';
  */
 export default function BdmHomeScreen({ navigation }) {
   const { user } = useAuth();
-  const [punchBusy, setPunchBusy] = useState(false);
-  const [punchError, setPunchError] = useState(null);
 
   const today = useAsync(attendanceApi.getToday, []);
   const dashboard = useAsync(fieldForceApi.getDashboard, []);
@@ -34,31 +34,13 @@ export default function BdmHomeScreen({ navigation }) {
     }),
     []
   );
-  
+
   useRefreshOnFocus(today.reload);
   useRefreshOnFocus(dashboard.reload);
   useRefreshOnFocus(dcrToday.reload);
 
-  const handlePunch = async () => {
-    setPunchError(null);
-    setPunchBusy(true);
-    try {
-      if (today.data?.punchInAt && !today.data?.punchOutAt) {
-        await attendanceApi.punchOut();
-      } else {
-        await attendanceApi.punchIn();
-      }
-      await today.reload();
-    } catch (err) {
-      setPunchError(err.uiMessage || err.message);
-    } finally {
-      setPunchBusy(false);
-    }
-  };
-
   const activeLeave = today.data?.activeLeave;
   const isOnLeaveToday = Boolean(activeLeave || today.data?.status === 'Leave');
-  const punchedIn = Boolean(today.data?.punchInAt && !today.data?.punchOutAt);
   const refreshing =
   today.status === 'loading' &&
   dashboard.status === 'loading' &&
@@ -81,38 +63,14 @@ export default function BdmHomeScreen({ navigation }) {
         }
       >
         <Card style={styles.hero}>
-          <Text style={styles.heroName}>{displayName(user)}</Text>
-          <Text style={styles.heroSub}>BDM · {user?.employeeDetails?.fieldForce?.territory || 'MIRUS'}</Text>
+          <BrandLogo variant="mark" size={28} boxed />
+          <View style={styles.heroText}>
+            <Text style={styles.heroName}>{displayName(user)}</Text>
+            <Text style={styles.heroSub}>BDM · {user?.employeeDetails?.fieldForce?.territory || 'MIRUS'}</Text>
+          </View>
         </Card>
 
-        {/* Punch In/Out — real timestamped state from the backend, never fabricated locally */}
-        <Card>
-          <View style={styles.punchRow}>
-            <View>
-              <Text style={typography.label}>Attendance</Text>
-              {today.status === 'loading' ? (
-                <Text style={styles.punchStatusMuted}>Checking…</Text>
-              ) : isOnLeaveToday && !punchedIn ? (
-                <Text style={[styles.punchStatus, { color: colors.warning }]}>
-                  On Leave Today
-                </Text>
-              ) : (
-                <Text style={[styles.punchStatus, { color: punchedIn ? colors.success : colors.danger }]}>
-                  {punchedIn ? `Punched in at ${new Date(today.data.punchInAt).toLocaleTimeString()}` : 'Not punched in'}
-                </Text>
-              )}
-            </View>
-            <Button
-              title={punchedIn ? 'Punch Out' : 'Punch In'}
-              variant={punchedIn ? 'danger' : 'primary'}
-              loading={punchBusy}
-              disabled={today.status === 'loading' || (isOnLeaveToday && !punchedIn)}
-              onPress={handlePunch}
-              style={styles.punchBtn}
-            />
-          </View>
-          <ErrorBanner message={punchError} />
-        </Card>
+        <PunchCard />
 
         {/* Leave Status / Apply Leave */}
         <Card style={styles.leaveCard} onPress={() => navigation.navigate('ApplyLeave')}>
@@ -301,13 +259,10 @@ function Stat({ value, label, color = colors.ink }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
   content: { padding: spacing.lg, gap: spacing.md },
-  hero: { backgroundColor: colors.ink },
+  hero: { backgroundColor: colors.ink, flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  heroText: { flex: 1 },
   heroName: { fontSize: 18, fontWeight: '700', color: colors.white },
   heroSub: { fontSize: 12, color: 'rgba(255,255,255,0.7)', marginTop: 2 },
-  punchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  punchStatus: { fontSize: 13, fontWeight: '600', marginTop: 2 },
-  punchStatusMuted: { fontSize: 13, color: colors.muted, marginTop: 2 },
-  punchBtn: { minWidth: 120 },
   leaveCard: { paddingVertical: spacing.md },
   leaveRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   leaveLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flex: 1 },

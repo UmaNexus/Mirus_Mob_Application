@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { displayName } from '../../navigation/roleHelpers';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
+import BrandLogo from '../../components/BrandLogo';
 import { colors, radii, spacing, typography } from '../../theme';
 
 const ITEMS = [
@@ -24,6 +25,7 @@ export default function MoreScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
+        <BrandLogo variant="mark" size={22} />
         <Text style={typography.title}>More</Text>
       </View>
       <View style={styles.grid}>
@@ -46,7 +48,7 @@ export default function MoreScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
-  header: { padding: spacing.lg, paddingBottom: spacing.sm },
+  header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.lg, paddingBottom: spacing.sm },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingHorizontal: spacing.lg },
   item: { width: '47%', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.lg },
   itemLabel: { fontSize: 13, fontWeight: '600', color: colors.ink },

@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Users, FileText, Wallet, SlidersHorizontal,
   UserCircle, FileSignature, FolderLock, Users2, FileCheck2,
-  CalendarCheck, Gauge, GraduationCap, Laptop, FileStack, DoorOpen, Building2
+  CalendarCheck, Gauge, GraduationCap, Laptop, FileStack, DoorOpen, Building2, Network
 } from 'lucide-react';
 
 // Manager (admin + HR) navigation. Admin additionally gets Company Settings.
@@ -21,7 +21,11 @@ const MANAGER_NAV = [
 ];
 
 export const NAV = {
-  admin: [...MANAGER_NAV, { to: '/company', label: 'Company Settings', icon: Building2 }],
+  admin: [
+    ...MANAGER_NAV,
+    { to: '/admin', label: 'Org Hierarchy', icon: Network },
+    { to: '/company', label: 'Company Settings', icon: Building2 }
+  ],
   hr: MANAGER_NAV,
   employee: [
     { to: '/me', label: 'My Profile', icon: UserCircle },

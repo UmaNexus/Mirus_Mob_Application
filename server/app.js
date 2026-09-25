@@ -39,6 +39,7 @@ import workTypeRoutes from './routes/workTypeRoutes.js';
 import stockistRoutes from './routes/stockistRoutes.js';
 import secondarySaleRoutes from './routes/secondarySaleRoutes.js';
 import fieldForceReportingRoutes from './routes/fieldForceReportingRoutes.js';
+import adminHierarchyRoutes from './routes/adminHierarchyRoutes.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
 import { tenantContextMiddleware } from './utils/tenantContext.js';
 import { corsOrigins } from './utils/clientOrigin.js';
@@ -109,6 +110,8 @@ app.use('/api/work-type', workTypeRoutes);
 app.use('/api/stockists', stockistRoutes);
 app.use('/api/secondary-sales', secondarySaleRoutes);
 app.use('/api/field-force', fieldForceReportingRoutes);
+// Admin Dashboard — organization hierarchy, role/manager assignment, permissions catalog.
+app.use('/api/admin', adminHierarchyRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

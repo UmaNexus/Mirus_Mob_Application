@@ -27,6 +27,7 @@ import OnboardingPage from './features/onboarding/OnboardingPage.jsx';
 import DocumentsPage from './features/documents/DocumentsPage.jsx';
 
 // New modules
+import AdminDashboardPage from './features/admin/AdminDashboardPage.jsx';
 import CompanySettingsPage from './features/company/CompanySettingsPage.jsx';
 import AttendanceAdminPage from './features/attendance/AttendanceAdminPage.jsx';
 import MyAttendancePage from './features/attendance/MyAttendancePage.jsx';
@@ -78,6 +79,7 @@ export default function App() {
           <Route path="doc-center" element={<ProtectedRoute roles={MANAGER}><DocCenterPage /></ProtectedRoute>} />
           <Route path="exits" element={<ProtectedRoute roles={MANAGER}><ExitsPage /></ProtectedRoute>} />
           <Route path="company" element={<ProtectedRoute roles={['admin']}><CompanySettingsPage /></ProtectedRoute>} />
+          <Route path="admin" element={<ProtectedRoute roles={['admin']}><AdminDashboardPage /></ProtectedRoute>} />
 
           {/* Shared */}
           <Route path="profile" element={<Profile />} />

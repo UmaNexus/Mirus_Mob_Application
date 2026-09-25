@@ -349,11 +349,62 @@ function dayTreatment(dateKey, blocks, pendingStart, pendingEnd) {
   return null;
 }
 
+/**
+ * One calendar week (7 equal-width cells) — every column is a plain
+ * `flex: 1` child, so column width is always (container width - gaps) / 7,
+ * whatever that container width actually is (phone or Expo Web) — never a
+ * fixed/hardcoded pixel or percentage value that can round unevenly.
+ */
+function WeekRow({ week, month, blocks, pendingStart, pendingEnd, holidayDates, onDayPress }) {
+  return (
+    <View style={styles.weekRow}>
+      {week.map((day, dayIdx) => {
+        if (!day) return <View key={`blank-${dayIdx}`} style={styles.cell} />;
+        const dateKey = `${month}-${String(day).padStart(2, '0')}`;
+        const treatment = dayTreatment(dateKey, blocks, pendingStart, pendingEnd);
+        const isEdge = treatment && (treatment.edge === 'start' || treatment.edge === 'end' || treatment.edge === 'both');
+        const weekend = isWeekend(dateKey);
+        const holiday = holidayDates?.has(dateKey);
+        // Weekends can never be a tour start/end/mid-range date — disabled
+        // here in addition to the handler-level guard in handleDayPress.
+        // Holidays stay tappable (MTP never disabled holidays before this
+        // change), just shown in red like every other calendar.
+        return (
+          <Pressable
+            key={dateKey}
+            onPress={() => onDayPress?.(dateKey)}
+            disabled={!onDayPress || weekend}
+            style={[
+              styles.cell, styles.dayCell,
+              treatment && { backgroundColor: treatment.soft },
+              isEdge && { backgroundColor: treatment.solid },
+              weekend && !treatment && styles.weekendCell,
+              holiday && styles.holidayCell
+            ]}
+          >
+            <Text style={[styles.dayText, isEdge && styles.dayTextOnSolid, weekend && !isEdge && styles.weekendText, holiday && !isEdge && styles.holidayText]}>{day}</Text>
+            {treatment?.kind === 'block' && treatment.edge !== 'mid' && treatment.edge !== 'end' && (
+              <Text style={[styles.areaTag, isEdge && styles.areaTagOnSolid]} numberOfLines={1} ellipsizeMode="tail">{treatment.area}</Text>
+            )}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function CalendarGrid({ month, blocks, pendingStart, pendingEnd, holidayDates, onDayPress }) {
   const [year, m] = month.split('-').map(Number);
   const total = daysInMonth(year, m);
   const leading = firstWeekdayMonFirst(year, m);
   const cells = [...Array(leading).fill(null), ...Array.from({ length: total }, (_, i) => i + 1)];
+  // Pad the trailing edge so every row has exactly 7 cells (keeps the grid a
+  // clean rectangle of equal-width columns) — purely a rendering nicety,
+  // never affects which weekday any real day falls under.
+  const trailing = (7 - (cells.length % 7)) % 7;
+  const paddedCells = [...cells, ...Array(trailing).fill(null)];
+  const weeks = [];
+  for (let i = 0; i < paddedCells.length; i += 7) weeks.push(paddedCells.slice(i, i + 7));
 
   return (
     <Card>
@@ -363,37 +414,18 @@ function CalendarGrid({ month, blocks, pendingStart, pendingEnd, holidayDates, o
         ))}
       </View>
       <View style={styles.grid}>
-        {cells.map((day, idx) => {
-          if (!day) return <View key={`blank-${idx}`} style={styles.cell} />;
-          const dateKey = `${month}-${String(day).padStart(2, '0')}`;
-          const treatment = dayTreatment(dateKey, blocks, pendingStart, pendingEnd);
-          const isEdge = treatment && (treatment.edge === 'start' || treatment.edge === 'end' || treatment.edge === 'both');
-          const weekend = isWeekend(dateKey);
-          const holiday = holidayDates?.has(dateKey);
-          // Weekends can never be a tour start/end/mid-range date — disabled
-          // here in addition to the handler-level guard in handleDayPress.
-          // Holidays stay tappable (MTP never disabled holidays before this
-          // change), just shown in red like every other calendar.
-          return (
-            <Pressable
-              key={dateKey}
-              onPress={() => onDayPress?.(dateKey)}
-              disabled={!onDayPress || weekend}
-              style={[
-                styles.cell, styles.dayCell,
-                treatment && { backgroundColor: treatment.soft },
-                isEdge && { backgroundColor: treatment.solid },
-                weekend && !treatment && styles.weekendCell,
-                holiday && styles.holidayCell
-              ]}
-            >
-              <Text style={[styles.dayText, isEdge && styles.dayTextOnSolid, weekend && !isEdge && styles.weekendText, holiday && !isEdge && styles.holidayText]}>{day}</Text>
-              {treatment?.kind === 'block' && treatment.edge !== 'mid' && treatment.edge !== 'end' && (
-                <Text style={[styles.areaTag, isEdge && styles.areaTagOnSolid]} numberOfLines={1}>{treatment.area}</Text>
-              )}
-            </Pressable>
-          );
-        })}
+        {weeks.map((week, weekIdx) => (
+          <WeekRow
+            key={weekIdx}
+            week={week}
+            month={month}
+            blocks={blocks}
+            pendingStart={pendingStart}
+            pendingEnd={pendingEnd}
+            holidayDates={holidayDates}
+            onDayPress={onDayPress}
+          />
+        ))}
       </View>
     </Card>
   );
@@ -415,11 +447,24 @@ const styles = StyleSheet.create({
   meta: { fontSize: 12, color: colors.muted },
   hint: { fontSize: 12, color: colors.muted, marginTop: 2, marginBottom: spacing.xs },
 
-  weekHeader: { flexDirection: 'row', flexWrap: 'wrap', gap: 2, marginBottom: spacing.xs },
-  weekHeaderText: { width: '13%', textAlign: 'center', fontSize: 11, fontWeight: '700', color: colors.muted },
+  // Every column below is a plain `flex: 1` sibling in a `flexDirection: 'row'`
+  // — width is always (card width - gaps) / 7, computed by the layout engine
+  // from whatever the calendar card's actual width is (phone or Expo Web),
+  // never a fixed/hardcoded pixel value or a `%` that has to fight `gap`.
+  weekHeader: { flexDirection: 'row', gap: spacing.xs, marginBottom: spacing.xs },
+  weekHeaderText: { flex: 1, textAlign: 'center', fontSize: 11, fontWeight: '700', color: colors.muted },
   weekendHeaderText: { color: colors.primary },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 2 },
-  cell: { width: '13%', aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderRadius: radii.sm, paddingHorizontal: 1 },
+  grid: { gap: spacing.xs },
+  weekRow: { flexDirection: 'row', gap: spacing.xs },
+  cell: {
+    flex: 1,
+    minHeight: 48, // a comfortable, stable touch target regardless of screen width
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: spacing.xs
+  },
   dayCell: {},
   dayText: { fontSize: 13, color: colors.ink },
   dayTextOnSolid: { color: colors.white, fontWeight: '700' },
@@ -427,7 +472,7 @@ const styles = StyleSheet.create({
   weekendText: { color: colors.muted },
   holidayCell: { backgroundColor: HOLIDAY_SOFT, borderWidth: 1, borderColor: HOLIDAY_COLOR, opacity: 1 },
   holidayText: { color: HOLIDAY_COLOR, fontWeight: '700' },
-  areaTag: { fontSize: 7, color: colors.ink, marginTop: 1 },
+  areaTag: { fontSize: 9, color: colors.ink, marginTop: 2, maxWidth: '100%' },
   areaTagOnSolid: { color: colors.white },
 
   planCard: { gap: spacing.sm },

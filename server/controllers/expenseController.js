@@ -8,6 +8,9 @@ import asyncHandler from '../utils/asyncHandler.js';
 import { logActivity } from '../services/activityService.js';
 import { rupeesToPaisa } from '../utils/money.js';
 import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds, canAccessFieldOpsUser } from '../middleware/fieldForceAuth.js';
+import { buildApprovalInfo } from '../utils/approvalInfo.js';
+
+const APPROVER_SELECT = 'personalDetails.firstName personalDetails.lastName role employeeDetails.fieldForce employeeDetails.employeeId';
 
 /**
  * POST /api/expenses — a BDM submits an expense claim, optionally with a
@@ -90,9 +93,17 @@ export const listTeamExpenses = asyncHandler(async (req, res) => {
 
   const expenses = await Expense.find(filter)
     .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce')
+    .populate('approverId', APPROVER_SELECT)
     .sort({ date: -1 })
     .limit(2000);
-  res.status(200).json({ success: true, data: expenses });
+
+  // `approval` is a read-only, additive summary of the ALREADY-STORED
+  // decision (never derived from the current reporting hierarchy) — for
+  // NSM/Admin reporting screens. Every existing field on the document is
+  // still returned unchanged, so this is purely additive for callers that
+  // don't look for it (e.g. the manager's own approvals inbox).
+  const data = expenses.map((expense) => ({ ...expense.toObject(), approval: buildApprovalInfo(expense) }));
+  res.status(200).json({ success: true, data });
 });
 
 /** GET /api/expenses/pending — an approver's inbox (approverId=self or submitter in caller's reporting subtree). */

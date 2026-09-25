@@ -235,7 +235,7 @@ export default function ApplyLeaveScreen() {
         )}
 
         {(leaves.data || []).map((item) => {
-          const canCancel = item.status === 'Pending' || item.status === 'Approved';
+          const canCancel = item.status === 'Pending'
           const itemType = LEAVE_TYPES.find((t) => t.value === item.type)?.label || item.type;
 
           return (

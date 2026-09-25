@@ -13,6 +13,9 @@ import {
 } from '../services/mirusAttendanceImport.js';
 import { PERMISSIONS, roleHasPermission } from '../config/permissions.js';
 import { buildReportingSubtreeIds, canAccessFieldOpsUser } from '../middleware/fieldForceAuth.js';
+import { buildApprovalInfo } from '../utils/approvalInfo.js';
+
+const LEAVE_APPROVER_SELECT = 'personalDetails.firstName personalDetails.lastName role employeeDetails.fieldForce employeeDetails.employeeId';
 
 
 const dateKeyOf = (d) => new Date(d).toISOString().slice(0, 10); // 'YYYY-MM-DD'
@@ -513,10 +516,28 @@ export const listLeaves = asyncHandler(async (req, res) => {
   }
 
   const leaves = await LeaveRequest.find(filter)
-    .populate('userId', 'email personalDetails.firstName personalDetails.lastName employeeDetails.employeeId employeeDetails.fieldForce')
+    .populate({
+      path: 'userId',
+      select: 'email personalDetails.firstName personalDetails.lastName employeeDetails.employeeId employeeDetails.fieldForce employeeDetails.reportingManagerId',
+      // LeaveRequest has no designated-approver field of its own (unlike
+      // Expense/MTP, `approverId` stays null until decided) — nested-populate
+      // the requester's CURRENT manager so a still-pending leave can show
+      // "Pending from <name>" (see buildApprovalInfo's `pendingApproverFallback`).
+      populate: { path: 'employeeDetails.reportingManagerId', select: LEAVE_APPROVER_SELECT }
+    })
+    .populate('approverId', LEAVE_APPROVER_SELECT)
     .sort({ createdAt: -1 })
     .limit(1000);
-  res.status(200).json({ success: true, data: leaves });
+
+  // `approval` — read-only, additive summary of the ALREADY-STORED decision
+  // (see buildApprovalInfo doc comment). Additive only: every existing field
+  // is unchanged, so the manager's own approvals inbox (same endpoint,
+  // filtered by status=Pending) is unaffected.
+  const data = leaves.map((leave) => ({
+    ...leave.toObject(),
+    approval: buildApprovalInfo(leave, { pendingApproverFallback: leave.userId?.employeeDetails?.reportingManagerId || null })
+  }));
+  res.status(200).json({ success: true, data });
 });
 
 /** PATCH /api/leaves/:id/decision — approve/reject (HR / Manager). Body: { status, note } */
@@ -561,8 +582,8 @@ export const cancelLeave = asyncHandler(async (req, res) => {
   const leave = await LeaveRequest.findById(req.params.id);
   if (!leave) throw new ApiError(404, 'Leave request not found');
   if (String(leave.userId) !== String(req.user._id)) throw new ApiError(403, 'You can only cancel your own leave');
-  if (!['Pending', 'Approved'].includes(leave.status)) {
-    throw new ApiError(400, 'Only pending or approved leave can be cancelled');
+  if (leave.status !== 'Pending') {
+  throw new ApiError(400, 'Only pending leave can be cancelled');
   }
 
   const prevStatus = leave.status;

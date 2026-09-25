@@ -31,3 +31,8 @@ export const tierRank = (tier) => FIELD_TIER_RANK[tier] || 0;
 
 /** True if `tier` is at or above `minTier` in the hierarchy (BDM lowest, NSM highest). */
 export const tierAtLeast = (tier, minTier) => tierRank(tier) >= tierRank(minTier);
+
+export const REQUIRED_MANAGER_TIER = { NSM: null, ZSM: 'NSM', RSM: 'ZSM', ASM: 'RSM', BDM: 'ASM' };
+
+/** The field-force tiers that can have their own direct reports (everyone but the leaf BDM tier). */
+export const MANAGER_TIERS = ['ASM', 'RSM', 'ZSM', 'NSM'];

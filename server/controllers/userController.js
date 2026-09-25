@@ -20,6 +20,8 @@ import { acceptOfferForProvisioning, findLatestProvisionableOffer } from '../ser
 import { PERMISSIONS, roleHasPermission } from '../config/permissions.js';
 import { clientOrigin } from '../utils/clientOrigin.js';
 import { logActivity } from '../services/activityService.js';
+import { withOptionalTransaction } from '../utils/withOptionalTransaction.js';
+import { assertValidManager, findNewlyBrokenDirectReports } from '../services/hierarchyGuard.js';
 
 const SETUP_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
 const displayName = (u) => `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim() || u.email;
@@ -166,6 +168,21 @@ const EDITABLE = {
 /**
  * PUT /api/users/:id
  * US 2.3 — edit a directory record. Admin/HR only (enforced at route).
+ *
+ * Hierarchy-integrity notes (organization hierarchy / Admin Dashboard):
+ *  - A plain reporting-manager REASSIGNMENT (no tier change) only validates
+ *    the one new manager being supplied — the existing behavior.
+ *  - A field-force TIER change is a separate, riskier operation: changing a
+ *    user's tier can silently invalidate (a) their OWN existing manager
+ *    relationship, and (b) every EXISTING direct report who depended on this
+ *    user's OLD tier (e.g. an ASM promoted to RSM must not leave their BDMs
+ *    still attached — BDM requires an ASM parent, not an RSM). Both are
+ *    checked and, if broken, must be resolved in the SAME request (own
+ *    manager via `reportingManagerId`, direct reports via `reassignments`)
+ *    or the whole tier change is rejected with the affected list — never
+ *    silently left invalid. This does NOT apply to same-tier manager
+ *    REPLACEMENT (POST /api/admin/hierarchy/replace-manager), which is a
+ *    different operation and is intentionally untouched.
  */
 export const updateUser = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid user id');
@@ -179,12 +196,85 @@ export const updateUser = asyncHandler(async (req, res) => {
     throw new ApiError(403, 'You are not permitted to change user roles');
   }
 
-  for (const [path, bodyKey] of Object.entries(EDITABLE)) {
-    if (req.body[bodyKey] !== undefined) user.set(path, req.body[bodyKey]);
+  const currentTier = user.employeeDetails?.fieldForce?.tier || null;
+  const requestedTier = req.body.fieldForceTier !== undefined ? (req.body.fieldForceTier || null) : currentTier;
+  const tierIsChanging = req.body.fieldForceTier !== undefined && requestedTier !== currentTier;
+  const managerIdProvided = req.body.reportingManagerId !== undefined;
+
+  // A new reporting manager, whenever supplied, must be valid for the
+  // (possibly just-changed) effective tier — never trusts the client-supplied id.
+  if (managerIdProvided) {
+    await assertValidManager({ targetUserId: user._id, tier: requestedTier, candidateManagerId: req.body.reportingManagerId });
   }
 
-  await user.save();
-  res.status(200).json({ success: true, message: 'User updated', user: toPublicUser(user) });
+  // Tier changing, manager NOT also being changed in this request => the
+  // EXISTING manager must still be valid for the new tier.
+  if (tierIsChanging && !managerIdProvided && user.employeeDetails?.reportingManagerId) {
+    try {
+      await assertValidManager({ targetUserId: user._id, tier: requestedTier, candidateManagerId: user.employeeDetails.reportingManagerId });
+    } catch (err) {
+      throw new ApiError(400, `Changing tier to "${requestedTier || 'none'}" would invalidate this user's own current reporting manager — assign a new one in the same request. (${err.message})`);
+    }
+  }
+
+  // Every EXISTING direct report whose relationship to this user is newly
+  // broken by the tier change must be resolved in this same request (via
+  // `reassignments: [{ userId, reportingManagerId }]`) or the whole tier
+  // change is rejected with the affected list — this is the actual
+  // hierarchy-integrity bug: a BDM silently left under a manager who is no
+  // longer an ASM.
+  let reassignmentPlan = [];
+  if (tierIsChanging) {
+    const affected = await findNewlyBrokenDirectReports({ userId: user._id, oldTier: currentTier, newTier: requestedTier });
+    if (affected.length > 0) {
+      const provided = Array.isArray(req.body.reassignments) ? req.body.reassignments : [];
+      const reassignmentByUserId = new Map(
+        provided.filter((r) => r && r.userId && r.reportingManagerId).map((r) => [String(r.userId), String(r.reportingManagerId)])
+      );
+
+      const stillUnresolved = affected.filter((a) => !reassignmentByUserId.has(a.id));
+      if (stillUnresolved.length > 0) {
+        throw new ApiError(
+          409,
+          `${affected.length} existing direct report${affected.length === 1 ? '' : 's'} would become invalid under the new tier and must be reassigned to a valid manager before continuing.`,
+          { affected }
+        );
+      }
+
+      // Every affected report IS covered — validate each new manager now, before any writes.
+      for (const a of affected) {
+        const newManagerId = reassignmentByUserId.get(a.id);
+        await assertValidManager({ targetUserId: a.id, tier: a.tier, candidateManagerId: newManagerId });
+        reassignmentPlan.push({ userId: a.id, reportingManagerId: newManagerId });
+      }
+    }
+  }
+
+  // Commit the user's own field edits plus every resolved reassignment
+  // atomically — a failed hierarchy update can never partially modify users.
+  await withOptionalTransaction(async (session) => {
+    for (const [path, bodyKey] of Object.entries(EDITABLE)) {
+      if (req.body[bodyKey] !== undefined) user.set(path, req.body[bodyKey]);
+    }
+    await user.save({ session });
+
+    for (const r of reassignmentPlan) {
+      await User.updateOne({ _id: r.userId }, { $set: { 'employeeDetails.reportingManagerId': r.reportingManagerId } }).session(session);
+    }
+  });
+
+  if (reassignmentPlan.length > 0) {
+    await logActivity({
+      actor: req.user,
+      action: 'user.hierarchy.tierChangeReassignment',
+      entityType: 'User',
+      entityId: user._id,
+      message: `${displayName(user)}'s tier change to "${requestedTier || 'none'}" reassigned ${reassignmentPlan.length} direct report(s) to a new manager`,
+      meta: { userId: String(user._id), newTier: requestedTier, reassignmentPlan }
+    });
+  }
+
+  res.status(200).json({ success: true, message: 'User updated', user: toPublicUser(user), reassignedCount: reassignmentPlan.length });
 });
 
 /**

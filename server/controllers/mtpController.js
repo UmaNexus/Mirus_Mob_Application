@@ -6,9 +6,10 @@ import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { logActivity } from '../services/activityService.js';
 import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds, buildReportingChainAbove, canAccessFieldOpsUser } from '../middleware/fieldForceAuth.js';
+import { buildApprovalInfo } from '../utils/approvalInfo.js';
 
 const EDITABLE_STATUSES = ['draft', 'rejected', 'withdrawn'];
-const APPROVER_SELECT = 'personalDetails.firstName personalDetails.lastName role employeeDetails.fieldForce';
+const APPROVER_SELECT = 'personalDetails.firstName personalDetails.lastName role employeeDetails.fieldForce employeeDetails.employeeId';
 const POPULATE = [
   { path: 'plannedVisits.doctorId', select: 'name speciality area' },
   { path: 'approverId', select: APPROVER_SELECT }
@@ -292,5 +293,11 @@ export const listTeamMtp = asyncHandler(async (req, res) => {
     .populate(POPULATE)
     .sort({ month: -1 })
     .limit(2000);
-  res.status(200).json({ success: true, data: plans });
+
+  // `approval` — read-only, additive summary of the ALREADY-STORED decision
+  // (see buildApprovalInfo doc comment). Additive only: `approverId` itself
+  // is still returned as before, so existing callers (e.g. TeamMtpScreen)
+  // are unaffected.
+  const data = plans.map((plan) => ({ ...plan.toObject(), approval: buildApprovalInfo(plan) }));
+  res.status(200).json({ success: true, data });
 });

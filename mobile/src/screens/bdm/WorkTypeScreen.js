@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ClipboardList, Users, Tent, Handshake, Thermometer, Palmtree, Send, CircleCheck } from 'lucide-react-native';
+import { ClipboardList, Users, Tent, Handshake, Send, CircleCheck } from 'lucide-react-native';
 import { useAsync } from '../../hooks/useAsync';
 import * as workTypeApi from '../../api/workType';
 import * as doctorsApi from '../../api/doctors';
@@ -11,7 +11,6 @@ import Card from '../../components/Card';
 import Button from '../../components/Button';
 import FormField from '../../components/FormField';
 import SelectField from '../../components/SelectField';
-import DateField from '../../components/DateField';
 import StatusBadge from '../../components/StatusBadge';
 import ErrorBanner from '../../components/ErrorBanner';
 import { colors, radii, spacing, typography } from '../../theme';
@@ -21,13 +20,7 @@ const TYPES = [
   { value: 'joint', icon: Users, label: 'Joint call' },
   { value: 'camp', icon: Tent, label: 'Special camp' },
   { value: 'meeting', icon: Handshake, label: 'Meeting' },
-  { value: 'sick', icon: Thermometer, label: 'Sick leave' },
-  { value: 'leave', icon: Palmtree, label: 'Planned leave' }
 ];
-
-// The REAL LeaveRequest enum (server/models/LeaveRequest.js) — no invented
-// CL/PL/SL values are offered here per the client's explicit decision.
-const LEAVE_TYPES = ['Casual', 'Sick', 'Earned', 'Unpaid', 'Maternity', 'Other'].map((t) => ({ label: t, value: t }));
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -59,10 +52,6 @@ export default function WorkTypeScreen({ navigation }) {
   const [venue, setVenue] = useState('');
   const [agenda, setAgenda] = useState('');
   const [meetingWith, setMeetingWith] = useState('team');
-  const [leaveType, setLeaveType] = useState('Casual');
-  const [fromDate, setFromDate] = useState(today());
-  const [toDate, setToDate] = useState(today());
-  const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [logged, setLogged] = useState(null); // the DCR call just logged, or null
@@ -70,7 +59,7 @@ export default function WorkTypeScreen({ navigation }) {
 
   const doctors = useAsync(doctorsApi.listMine, []);
   const participants = useAsync(fieldForceApi.getJointCallParticipants, []);
-  const doctorOptions = (doctors.data || []).map((d) => ({ label: d.name, value: d._id, sublabel: d.speciality }));
+  const doctorOptions = (doctors.data || []).map((d) => ({ label: d.name, value: d._id, sublabel: `${d.speciality} - ${d.area}` }));
 
   const userLabel = (u) => `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim() || 'Unnamed';
   const userSublabel = (u) => [u.employeeDetails?.fieldForce?.tier, u.employeeDetails?.fieldForce?.territory].filter(Boolean).join(' · ');
@@ -137,7 +126,6 @@ export default function WorkTypeScreen({ navigation }) {
         // DailyCallReport row; see workTypeController.js/dcrController.js).
         const details = {};
         if (type === 'meeting') { details.meetingWith = meetingWith; details.agenda = agenda; details.venue = venue; }
-        if (type === 'sick' || type === 'leave') { details.leaveType = leaveType; details.fromDate = fromDate; details.toDate = toDate; details.reason = reason; }
         await workTypeApi.upsert({ date, type, details });
         setSaved(true);
       }
@@ -249,16 +237,6 @@ export default function WorkTypeScreen({ navigation }) {
             <FormField label="Location" value={venue} onChangeText={setVenue} placeholder="Office / virtual / field" />
           </View>
         )}
-
-        {(type === 'sick' || type === 'leave') && (
-          <View style={styles.subForm}>
-            <SelectField label="Leave type" value={leaveType} onChange={setLeaveType} options={LEAVE_TYPES} />
-            <DateField label="From date" value={fromDate} onChange={setFromDate} />
-            <DateField label="To date" value={toDate} onChange={setToDate} />
-            <FormField label="Reason" value={reason} onChangeText={setReason} placeholder="Enter reason…" multiline numberOfLines={2} />
-          </View>
-        )}
-
         <ErrorBanner message={error} />
         {saved && <StatusBadge label={type === 'meeting' ? 'Meeting logged' : 'Work type saved'} tone="success" />}
         {!(isLoggableType && logged) && (

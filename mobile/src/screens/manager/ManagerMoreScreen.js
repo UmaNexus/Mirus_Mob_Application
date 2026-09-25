@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { displayName, resolveUserTier } from '../../navigation/roleHelpers';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
+import BrandLogo from '../../components/BrandLogo';
 import { colors, spacing, typography, iconSizes } from '../../theme';
 
 export default function ManagerMoreScreen({ navigation }) {
@@ -16,6 +17,7 @@ export default function ManagerMoreScreen({ navigation }) {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.content}>
         <View style={styles.header}>
+          <BrandLogo variant="mark" size={22} />
           <Text style={typography.title}>More</Text>
         </View>
 
@@ -53,7 +55,7 @@ function NavRow({ icon: Icon, title, subtitle, onPress }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
   content: { padding: spacing.lg, gap: spacing.md },
-  header: { paddingBottom: spacing.xs },
+  header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingBottom: spacing.xs },
   card: { gap: spacing.xs },
   name: { fontSize: 18, fontWeight: '700', color: colors.ink },
   role: { fontSize: 13, color: colors.primary, fontWeight: '600' },
