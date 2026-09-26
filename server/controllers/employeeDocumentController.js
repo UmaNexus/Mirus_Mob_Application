@@ -7,7 +7,7 @@ import Company from '../models/Company.js';
 import OfferLetter from '../models/OfferLetter.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { generateCompanyDocPdf, bakeSignatureOnDoc } from '../services/pdfService.js';
+import { generateCompanyDocPdf, bakeSignatureOnDoc, formatOfferDate } from '../services/pdfService.js';
 import { buildAppointmentLetterPdf, appointmentFileName } from '../services/appointmentLetterService.js';
 
 const fullName = (u) => `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim();
@@ -18,14 +18,14 @@ const TEMPLATES = {
     title: 'APPOINTMENT LETTER',
     requiresSignature: true,
     paragraphs: (ctx) => [
-      `We are pleased to confirm your appointment as ${ctx.designation || 'an employee'} with effect from ${new Date(ctx.effectiveDate).toDateString()}.`
+      `We are pleased to confirm your appointment as ${ctx.designation || 'an employee'} with effect from ${formatOfferDate(ctx.effectiveDate)}.`
     ]
   },
   NDA: {
     title: 'Non-Disclosure & Confidentiality Agreement',
     requiresSignature: true,
     paragraphs: (ctx) => [
-      `This Agreement is entered into between ${ctx.companyName} and ${ctx.employeeName} effective ${new Date(ctx.effectiveDate).toDateString()}.`,
+      `This Agreement is entered into between ${ctx.companyName} and ${ctx.employeeName} effective ${formatOfferDate(ctx.effectiveDate)}.`,
       `You agree to hold in strict confidence all proprietary and confidential information of the company and not to disclose it to any third party during or after your employment.`,
       `Breach of this agreement may result in disciplinary and legal action. Please sign below to confirm your agreement.`
     ]

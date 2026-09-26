@@ -8,12 +8,10 @@ import tenantScope from './plugins/tenantScope.js';
  * as the company agreement form; placeholders in the PDF are filled manually
  * or by a future merge pipeline.
  */
-export const CF_TEMPLATE_TYPES = ['CFAgent', 'CFDistributor', 'CFWholesaler'];
+export const CF_TEMPLATE_TYPES = ['CFAgent'];
 
 export const CF_TEMPLATE_TYPE_LABELS = {
-  CFAgent: 'C&F Agent',
-  CFDistributor: 'C&F Distributor',
-  CFWholesaler: 'C&F Wholesaler'
+  CFAgent: 'C&F Agency'
 };
 
 const CFTemplateSchema = new mongoose.Schema({

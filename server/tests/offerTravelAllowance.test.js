@@ -17,11 +17,14 @@ test('ASM / Area Sales Manager gets stay line', () => {
   assert.equal(getOfferTravelAllowanceLine('Area development manager')?.roleKey, 'ASM');
 });
 
-test('RBM / Regional Business Manager gets HQ line', () => {
-  const a = getOfferTravelAllowanceLine('Regional Business Manager');
-  assert.equal(a?.roleKey, 'RBM');
+test('RSM / Regional Sales Manager gets HQ line', () => {
+  const a = getOfferTravelAllowanceLine('Regional Sales Manager');
+  assert.equal(a?.roleKey, 'RSM');
   assert.match(a.text, /Headquarters - Rs 500/);
-  assert.equal(getOfferTravelAllowanceLine('Regional development manager')?.roleKey, 'RBM');
+  assert.equal(getOfferTravelAllowanceLine('RSM')?.roleKey, 'RSM');
+  assert.equal(getOfferTravelAllowanceLine('Regional Business Manager')?.roleKey, 'RSM');
+  assert.equal(getOfferTravelAllowanceLine('Regional development manager')?.roleKey, 'RSM');
+  assert.equal(getOfferTravelAllowanceLine('RBM')?.roleKey, 'RSM');
 });
 
 test('Admin, HR, IT and unknown roles get no line', () => {

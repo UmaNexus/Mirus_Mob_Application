@@ -17,7 +17,9 @@ export default function EmployeeSelect({
   roles,
   emptyLabel = 'Select…',
   /** When true (default), only users with an assigned employeeId are listed. */
-  employeesOnly = true
+  employeesOnly = true,
+  /** Array of user IDs to exclude from options */
+  excludeIds = []
 }) {
   const { data } = useAsync(
     () => listUsers({
@@ -28,7 +30,11 @@ export default function EmployeeSelect({
     }),
     [employeesOnly, Array.isArray(roles) ? roles.join(',') : roles]
   );
-  const users = (data?.data || []).filter((u) => (roles ? roles.includes(u.role) : true));
+  const excludeSet = new Set((excludeIds || []).map(String));
+  const users = (data?.data || [])
+    .filter((u) => (roles ? roles.includes(u.role) : true))
+    .filter((u) => String(u._id) === String(value) || !excludeSet.has(String(u._id)));
+
   return (
     <TextField select fullWidth size={size} label={label} value={value || ''} onChange={(e) => onChange(e.target.value)}>
       <MenuItem value="">{emptyLabel}</MenuItem>
