@@ -1,7 +1,7 @@
 import React from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, RefreshControl, Linking, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ClipboardList, CalendarDays, Receipt, ListChecks, AlertTriangle, Palmtree } from 'lucide-react-native';
+import { ClipboardList, CalendarDays, Receipt, ListChecks, AlertTriangle, Palmtree, Cake, Phone, ChevronRight } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { useAsync } from '../../hooks/useAsync';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
@@ -18,6 +18,16 @@ import PunchCard from '../../components/PunchCard';
 import BrandLogo from '../../components/BrandLogo';
 import { colors, spacing, radii, typography } from '../../theme';
 
+function isBirthdayToday(alert) {
+  if (alert.isToday === true) return true;
+  if (!alert.date) return false;
+  const d = new Date(alert.date);
+  const now = new Date();
+  const localMatch = d.getDate() === now.getDate() && d.getMonth() === now.getMonth();
+  const utcMatch = d.getUTCDate() === now.getUTCDate() && d.getUTCMonth() === now.getUTCMonth();
+  return localMatch || utcMatch;
+}
+
 /**
  * BDM dashboard. Every number here comes from a live API call — no
  * hardcoded demo stats (today's calls, pending DCR, expense total, MTP
@@ -28,6 +38,7 @@ export default function BdmHomeScreen({ navigation }) {
 
   const today = useAsync(attendanceApi.getToday, []);
   const dashboard = useAsync(fieldForceApi.getDashboard, []);
+  const alerts = useAsync(fieldForceApi.getAlerts, []);
   const dcrToday = useAsync(
   () => dcrApi.listMine({
     date: new Date().toISOString().slice(0, 10)
@@ -37,6 +48,7 @@ export default function BdmHomeScreen({ navigation }) {
 
   useRefreshOnFocus(today.reload);
   useRefreshOnFocus(dashboard.reload);
+  useRefreshOnFocus(alerts.reload);
   useRefreshOnFocus(dcrToday.reload);
 
   const activeLeave = today.data?.activeLeave;
@@ -44,8 +56,16 @@ export default function BdmHomeScreen({ navigation }) {
   const refreshing =
   today.status === 'loading' &&
   dashboard.status === 'loading' &&
+  alerts.status === 'loading' &&
   dcrToday.status === 'loading';
   const todaysPlan = (dcrToday.data || []).slice(0, 3);
+
+  const todayBirthdays = (alerts.data || []).filter(
+    (a) => a.type === 'birthday' && isBirthdayToday(a)
+  );
+  const birthdayDoctorIdSet = new Set(
+    todayBirthdays.map((b) => String(b.doctorId)).filter(Boolean)
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -149,6 +169,60 @@ export default function BdmHomeScreen({ navigation }) {
         {/* todaysPlan */}
         <Text style={typography.label}>Today's plan</Text>
 
+        {/* Doctor Birthday Banner(s) in Today's Plan */}
+        {todayBirthdays.map((b, idx) => (
+          <Card
+            key={b.doctorId || idx}
+            style={styles.birthdayCard}
+            onPress={() => {
+              if (b.doctorId) {
+                navigation.navigate('DoctorDetail', {
+                  doctor: {
+                    _id: b.doctorId,
+                    name: b.name,
+                    speciality: b.speciality,
+                    area: b.area,
+                    phone: b.phone,
+                    dob: b.date
+                  }
+                });
+              }
+            }}
+          >
+            <View style={styles.birthdayCardContent}>
+              <View style={styles.birthdayIconBox}>
+                <Cake size={22} color="#D97706" />
+              </View>
+              <View style={styles.birthdayInfo}>
+                <View style={styles.birthdayHeaderRow}>
+                  <Text style={styles.birthdayBadgeText}>TODAY'S BIRTHDAY</Text>
+                </View>
+                <Text style={styles.birthdayDoctorName}>
+                  {b.name?.startsWith('Dr') ? b.name : `Dr. ${b.name}`}
+                </Text>
+                <Text style={styles.birthdayDoctorMeta}>
+                  {[b.speciality, b.area].filter(Boolean).join(' · ') || 'Assigned Doctor'}
+                </Text>
+              </View>
+              {b.phone ? (
+                <TouchableOpacity
+                  style={styles.birthdayCallBtn}
+                  activeOpacity={0.7}
+                  onPress={(e) => {
+                    e?.stopPropagation?.();
+                    Linking.openURL(`tel:${b.phone}`);
+                  }}
+                >
+                  <Phone size={14} color="#FFFFFF" />
+                  <Text style={styles.birthdayCallBtnText}>Call</Text>
+                </TouchableOpacity>
+              ) : (
+                <ChevronRight size={18} color={colors.muted} />
+              )}
+            </View>
+          </Card>
+        ))}
+
         {dcrToday.status === 'loading' && <LoadingView />}
 
         {dcrToday.status === 'error' && (
@@ -179,6 +253,9 @@ export default function BdmHomeScreen({ navigation }) {
                       .filter(Boolean)
                       .join(' · ') || 'No product noted';
 
+                const docId = String(item.doctorId?._id || item.doctorId || '');
+                const hasBirthday = Boolean(docId && birthdayDoctorIdSet.has(docId));
+
                 return (
                   <View
                     key={item._id}
@@ -188,9 +265,17 @@ export default function BdmHomeScreen({ navigation }) {
                     ]}
                   >
                     <View style={styles.planInfo}>
-                      <Text style={styles.planTitle}>
-                        {title}
-                      </Text>
+                      <View style={styles.planTitleContainer}>
+                        <Text style={styles.planTitle}>
+                          {title}
+                        </Text>
+                        {hasBirthday && (
+                          <View style={styles.planBirthdayTag}>
+                            <Cake size={11} color="#B45309" />
+                            <Text style={styles.planBirthdayTagText}>Birthday Today</Text>
+                          </View>
+                        )}
+                      </View>
 
                       <Text style={styles.planSubtitle}>
                         {subtitle}
@@ -370,5 +455,99 @@ planSubtitle: {
   fontSize: 12,
   color: colors.muted,
   marginTop: 3
+},
+
+birthdayCard: {
+  backgroundColor: '#FFFBEB',
+  borderColor: '#FDE68A',
+  borderWidth: 1,
+  borderLeftWidth: 4,
+  borderLeftColor: '#F59E0B',
+  marginBottom: spacing.xs,
+},
+
+birthdayCardContent: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: spacing.sm,
+},
+
+birthdayIconBox: {
+  width: 42,
+  height: 42,
+  borderRadius: radii.md,
+  backgroundColor: '#FEF3C7',
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+
+birthdayInfo: {
+  flex: 1,
+},
+
+birthdayHeaderRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  marginBottom: 2,
+},
+
+birthdayBadgeText: {
+  fontSize: 10,
+  fontWeight: '700',
+  color: '#B45309',
+  letterSpacing: 0.5,
+},
+
+birthdayDoctorName: {
+  fontSize: 15,
+  fontWeight: '700',
+  color: '#78350F',
+},
+
+birthdayDoctorMeta: {
+  fontSize: 12,
+  color: '#92400E',
+  marginTop: 2,
+},
+
+birthdayCallBtn: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 4,
+  backgroundColor: '#059669',
+  paddingHorizontal: spacing.sm + 2,
+  paddingVertical: spacing.xs + 2,
+  borderRadius: radii.sm,
+},
+
+birthdayCallBtnText: {
+  color: '#FFFFFF',
+  fontSize: 12,
+  fontWeight: '600',
+},
+
+planTitleContainer: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  gap: spacing.xs,
+},
+
+planBirthdayTag: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 3,
+  backgroundColor: '#FEF3C7',
+  paddingHorizontal: 6,
+  paddingVertical: 2,
+  borderRadius: radii.sm,
+  borderWidth: 1,
+  borderColor: '#FDE68A',
+},
+
+planBirthdayTagText: {
+  fontSize: 10,
+  fontWeight: '600',
+  color: '#92400E',
 },
 });

@@ -64,22 +64,46 @@ export const listDoctorAlerts = asyncHandler(async (req, res) => {
   const doctors = await Doctor.find({
     assignedTo: req.user._id,
     $or: [{ dob: { $ne: null } }, { anniversaryDate: { $ne: null } }]
-  }).select('name speciality area dob anniversaryDate');
+  }).select('name speciality area phone dob anniversaryDate');
 
   const today = new Date();
   const withinWindow = (date, days = 7) => {
-    if (!date) return false;
+    if (!date) return { inRange: false, diff: -1 };
     const d = new Date(date);
     const next = new Date(Date.UTC(today.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
     let diff = Math.round((next - Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())) / 86400000);
     if (diff < 0) diff += 365; // wrapped into next year
-    return diff >= 0 && diff <= days;
+    return { inRange: diff >= 0 && diff <= days, diff };
   };
 
   const alerts = [];
   for (const doc of doctors) {
-    if (withinWindow(doc.dob)) alerts.push({ doctorId: doc._id, name: doc.name, type: 'birthday', date: doc.dob });
-    if (withinWindow(doc.anniversaryDate)) alerts.push({ doctorId: doc._id, name: doc.name, type: 'anniversary', date: doc.anniversaryDate });
+    const dobCheck = withinWindow(doc.dob);
+    if (dobCheck.inRange) {
+      alerts.push({
+        doctorId: doc._id,
+        name: doc.name,
+        speciality: doc.speciality,
+        area: doc.area,
+        phone: doc.phone,
+        type: 'birthday',
+        date: doc.dob,
+        isToday: dobCheck.diff === 0
+      });
+    }
+    const annivCheck = withinWindow(doc.anniversaryDate);
+    if (annivCheck.inRange) {
+      alerts.push({
+        doctorId: doc._id,
+        name: doc.name,
+        speciality: doc.speciality,
+        area: doc.area,
+        phone: doc.phone,
+        type: 'anniversary',
+        date: doc.anniversaryDate,
+        isToday: annivCheck.diff === 0
+      });
+    }
   }
   res.status(200).json({ success: true, data: alerts });
 });
