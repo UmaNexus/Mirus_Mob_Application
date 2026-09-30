@@ -71,6 +71,7 @@ app.use(tenantContextMiddleware);
 // user-facing files exposed through the browser.
 app.use('/uploads', express.static(path.resolve('uploads')));
 
+app.get('/', (req, res) => res.json({ success: true, message: 'HRMS API Server is running', health: '/api/health' }));
 app.get('/api/health', (req, res) => res.json({ success: true, status: 'ok' }));
 
 app.use('/api/tenants', tenantRoutes);

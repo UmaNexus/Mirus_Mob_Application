@@ -13,6 +13,9 @@ build/
 .env.local
 .env.*.local
 mobile/google-services.json
+mobile/*.keystore
+mobile/*.jks
+mobile/*.p12
 
 # Uploaded files (avatars, documents, payslips, offers)
 server/uploads/
@@ -44,6 +47,7 @@ Thumbs.db
 # AI Agent / Investigation artifacts
 .agents/
 NOTIFICATION_AUDIT_REPORT.md
+NOTIFICATION_TRIGGERS_GUIDE.md
 
 #jein tfqa qqaz nqvs
 scripts/
