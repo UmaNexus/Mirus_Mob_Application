@@ -16,6 +16,9 @@ const OFFER_EXTRA = [
   { key: 'joiningDate', label: 'Joining date', type: 'text', required: true, onPdf: true },
   { key: 'ctc', label: 'Annual CTC', type: 'text', required: false, onPdf: true },
   { key: 'offerDate', label: 'Offer date', type: 'text', required: false, onPdf: true },
+  { key: 'phone', label: 'Mobile / phone', type: 'text', required: false, onPdf: true },
+  { key: 'email', label: 'Email', type: 'text', required: false, onPdf: true },
+  { key: 'address', label: 'Full address', type: 'text', required: false, onPdf: true },
   { key: 'companyLocation', label: 'Company / organisation base location', type: 'text', required: false, onPdf: true },
   { key: 'jobLocation', label: 'Employee job / posting location', type: 'text', required: false, onPdf: true }
 ];
@@ -42,6 +45,8 @@ export const LETTER_FIELD_ALIASES = {
   'Employee name': 'employeeName',
   'Full Name': 'employeeName',
   'Full name': 'employeeName',
+  'Candidate Full Name': 'employeeName',
+  'Candidate full name': 'employeeName',
   Role: 'designation',
   role: 'designation',
   Position: 'designation',
@@ -60,7 +65,21 @@ export const LETTER_FIELD_ALIASES = {
   Amount: 'amount',
   amount: 'amount',
   Reason: 'reason',
-  reason: 'reason'
+  reason: 'reason',
+  Package: 'ctc',
+  package: 'ctc',
+  CTC: 'ctc',
+  'Total CTC': 'ctc',
+  'Package in words': 'ctcWords',
+  'package in words': 'ctcWords',
+  'Basic salary': 'basicSalary',
+  'House Rent Allowance': 'hra',
+  HRA: 'hra',
+  'Leave Travel allowance': 'lta',
+  LTA: 'lta',
+  'Special allowance': 'specialAllowance',
+  'Gross Month salary': 'grossSalary',
+  PF: 'pf'
 };
 
 const SERVICE_EXTRA = [
