@@ -15,10 +15,12 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.umanexus.fieldforce"
     },
+    "icon": "./assets/logo-mirus-mark.png",
     "android": {
       "package": "com.umanexus.fieldforce",
       "versionCode": 1,
       "adaptiveIcon": {
+        "foregroundImage": "./assets/logo-mirus-mark.png",
         "backgroundColor": "#FFFFFF"
       }
     },

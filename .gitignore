@@ -40,4 +40,9 @@ Thumbs.db
 !.vscode/extensions.json
 *.swp
 
+# AI Agent / Investigation artifacts
+.agents/
+NOTIFICATION_AUDIT_REPORT.md
+
 #jein tfqa qqaz nqvs
+scripts/
