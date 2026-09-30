@@ -96,10 +96,10 @@ export default function CFTemplatesSection() {
   return (
     <div>
       <p className="mb-4 text-sm text-muted">
-        Manage Clearing &amp; Forwarding agreement templates by partner type. Seed defaults are available after setup; upload a PDF to customize. At issue time you only need party details — other blanks are prefilled.
+        Manage Clearing &amp; Forwarding agreement templates. Seed defaults are available after setup; upload a PDF to customize. At issue time you only need party details — other blanks are prefilled.
       </p>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="max-w-2xl space-y-4">
         {CF_TEMPLATE_TYPES.map((type) => (
           <Card key={type}>
             <CardBody>
@@ -162,7 +162,7 @@ export default function CFTemplatesSection() {
               label="Template name"
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder={form.type === 'CFAgent' ? 'e.g. C&F Agent Agreement' : 'e.g. Standard agreement'}
+              placeholder="e.g. C&F Agency Agreement"
             />
             <TextField
               size="small"

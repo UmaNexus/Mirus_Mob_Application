@@ -20,7 +20,7 @@ export const DEFAULT_JOB_ROLES = [
   'Business development manager',
   'Area development manager',
   'Zonal development manager',
-  'Regional development manager',
+  'Regional sales manager',
   'Office head',
   'HR'
 ];

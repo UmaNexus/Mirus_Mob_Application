@@ -1,10 +1,12 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import mongoose from 'mongoose';
 import ExitRecord from '../models/ExitRecord.js';
 import User from '../models/User.js';
 import Company from '../models/Company.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { generateCompanyDocPdf } from '../services/pdfService.js';
+import { generateCompanyDocPdf, formatOfferDate } from '../services/pdfService.js';
 import fnfService from '../services/fnfService.js';
 import { logActivity } from '../services/activityService.js';
 
@@ -18,7 +20,11 @@ export const initiateExit = asyncHandler(async (req, res) => {
   const user = await User.findById(userId);
   if (!user) throw new ApiError(404, 'Employee not found');
 
+  const existing = await ExitRecord.findOne({ userId, status: { $in: ['Initiated', 'InProgress'] } });
+  if (existing) throw new ApiError(400, 'An exit has already been initiated for this employee');
+
   const record = await ExitRecord.create({ userId, resignationDate, lastWorkingDay, reason, status: 'Initiated' });
+  await record.populate('userId', 'email personalDetails.firstName personalDetails.lastName employeeDetails.employeeId');
   await logActivity({
     actor: req.user,
     action: 'exit.initiate',
@@ -33,14 +39,18 @@ export const initiateExit = asyncHandler(async (req, res) => {
 export const listExits = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.status) filter.status = req.query.status;
-  const data = await ExitRecord.find(filter).sort({ createdAt: -1 }).limit(500);
+  const data = await ExitRecord.find(filter)
+    .populate('userId', 'email personalDetails.firstName personalDetails.lastName employeeDetails.employeeId')
+    .sort({ createdAt: -1 })
+    .limit(500);
   res.status(200).json({ success: true, data });
 });
 
 /** GET /api/exits/:id */
 export const getExit = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid id');
-  const record = await ExitRecord.findById(req.params.id);
+  const record = await ExitRecord.findById(req.params.id)
+    .populate('userId', 'email personalDetails.firstName personalDetails.lastName employeeDetails.employeeId');
   if (!record) throw new ApiError(404, 'Exit record not found');
   res.status(200).json({ success: true, record });
 });
@@ -84,7 +94,7 @@ export const generateExitLetters = asyncHandler(async (req, res) => {
   const fnfFields = req.body?.fnfFields && typeof req.body.fnfFields === 'object' ? req.body.fnfFields : {};
   const name = fullName(user);
   const designation = user.employeeDetails?.designation || 'Employee';
-  const doj = user.employeeDetails?.dateOfJoining ? new Date(user.employeeDetails.dateOfJoining).toDateString() : 'the date of joining';
+  const doj = user.employeeDetails?.dateOfJoining ? formatOfferDate(user.employeeDetails.dateOfJoining) : 'the date of joining';
   const companyName = company?.name || 'the Company';
 
   const safeReason = String(fnfFields.reason || record.reason || 'Resignation').trim();
@@ -108,14 +118,14 @@ export const generateExitLetters = asyncHandler(async (req, res) => {
   record.relievingLetterUrl = await generateCompanyDocPdf({
     title: 'Relieving Letter', company, employeeName: name, designation, effectiveDate: record.lastWorkingDay,
     paragraphs: [
-      `This is to certify that ${name} (${designation}) has been relieved from the services of ${companyName} with effect from the close of business on ${new Date(record.lastWorkingDay).toDateString()}.`,
+      `This is to certify that ${name} (${designation}) has been relieved from the services of ${companyName} with effect from the close of business on ${formatOfferDate(record.lastWorkingDay)}.`,
       `We confirm that all dues have been settled as per company policy. We wish ${name} success in future endeavours.`
     ]
   });
   record.experienceLetterUrl = await generateCompanyDocPdf({
     title: 'Experience Letter', company, employeeName: name, designation, effectiveDate: record.lastWorkingDay,
     paragraphs: [
-      `This is to certify that ${name} was employed with ${companyName} as ${designation} from ${doj} to ${new Date(record.lastWorkingDay).toDateString()}.`,
+      `This is to certify that ${name} was employed with ${companyName} as ${designation} from ${doj} to ${formatOfferDate(record.lastWorkingDay)}.`,
       `During the tenure, their conduct and performance were found to be satisfactory.`
     ]
   });
@@ -163,6 +173,45 @@ export const generateExitLetters = asyncHandler(async (req, res) => {
     previewLetterUrl
   });
 });
+
+/**
+ * GET /api/exits/:id/fnf — stream/download FNF letter.
+ * Generates the letter on demand if not yet generated.
+ */
+export const downloadFNFLetter = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.isValidObjectId(id)) throw new ApiError(400, 'Invalid exit id');
+
+  const record = await ExitRecord.findById(id);
+  if (!record) throw new ApiError(404, 'Exit record not found');
+  const user = await User.findById(record.userId);
+  if (!user) throw new ApiError(404, 'Employee not found');
+  const company = await Company.findById(req.user.companyId || user.companyId);
+
+  const name = fullName(user) || 'Employee';
+  const safeName = (name.replace(/[^a-zA-Z0-9_-]/g, '_') || 'Employee').trim();
+  const downloadFileName = `${safeName}_FNF_Settlement.pdf`;
+
+  // Always re-generate FNF PDF on download to reflect latest template, branding, and fixes
+  const fnfPdf = await fnfService.generateFNFPdf({ record, user, company });
+  if (fnfPdf) {
+    record.fnfLetterUrl = fnfPdf;
+    await record.save();
+  }
+
+  if (!record.fnfLetterUrl) {
+    throw new ApiError(404, 'No active FNF letter template found. Please configure one under Letter Templates.');
+  }
+
+  const abs = path.resolve(process.cwd(), record.fnfLetterUrl);
+  if (!fs.existsSync(abs)) throw new ApiError(404, 'FNF PDF file missing on disk');
+
+  const disposition = req.query.download === 'false' ? 'inline' : 'attachment';
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `${disposition}; filename="${downloadFileName}"`);
+  fs.createReadStream(abs).pipe(res);
+});
+
 
 /** DELETE /api/exits/:id — only when Initiated and no letters issued. */
 export const deleteExit = asyncHandler(async (req, res) => {

@@ -564,7 +564,7 @@ test('FNF letter accepts user-entered settlement values before issuing', async (
   assert.ok(outbox.some((o) => String(o.to).includes(employee.email)), 'FNF email should be sent to the employee email');
 });
 
-test('C&F templates — create agent/distributor/wholesaler with PDF upload', async () => {
+test('C&F templates — create agent with PDF upload', async () => {
   const { admin, emp } = await setup();
 
   // Minimal PDF header so multer/file filter accepts it.
@@ -573,7 +573,7 @@ test('C&F templates — create agent/distributor/wholesaler with PDF upload', as
   const created = await admin
     .post('/api/cf-templates')
     .field('type', 'CFAgent')
-    .field('name', 'C&F Agent Agreement')
+    .field('name', 'C&F Agency Agreement')
     .field('description', 'Test agent template')
     .attach('file', pdf, { filename: 'cf-agent.pdf', contentType: 'application/pdf' });
   assert.equal(created.status, 201);
@@ -583,8 +583,8 @@ test('C&F templates — create agent/distributor/wholesaler with PDF upload', as
   const list = await admin.get('/api/cf-templates');
   assert.equal(list.status, 200);
   assert.equal(list.body.data.length, 1);
-  assert.ok(list.body.meta.types.includes('CFDistributor'));
-  assert.ok(list.body.meta.types.includes('CFWholesaler'));
+  assert.ok(list.body.meta.types.includes('CFAgent'));
+  assert.equal(list.body.meta.types.length, 1);
 
   const file = await admin.get(`/api/cf-templates/${created.body.template._id}/file`);
   assert.equal(file.status, 200);
@@ -597,12 +597,12 @@ test('C&F issue — fill blanks, generate PDF and queue email', async () => {
   const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
   const tpl = await admin
     .post('/api/cf-templates')
-    .field('type', 'CFDistributor')
-    .field('name', 'Distributor Standard')
-    .attach('file', pdf, { filename: 'dist.pdf', contentType: 'application/pdf' });
+    .field('type', 'CFAgent')
+    .field('name', 'C&F Agency Standard')
+    .attach('file', pdf, { filename: 'agent.pdf', contentType: 'application/pdf' });
   assert.equal(tpl.status, 201);
 
-  const fieldsMeta = await admin.get('/api/cf-issues/fields').query({ type: 'CFDistributor' });
+  const fieldsMeta = await admin.get('/api/cf-issues/fields').query({ type: 'CFAgent' });
   assert.equal(fieldsMeta.status, 200);
   assert.ok(fieldsMeta.body.fields.some((f) => f.key === 'partyName'));
   assert.ok(fieldsMeta.body.fields.some((f) => f.key === 'recipientEmail'));
@@ -629,6 +629,56 @@ test('C&F issue — fill blanks, generate PDF and queue email', async () => {
 
   const dl = await admin.get(`/api/cf-issues/${issued.body.issue._id}/pdf`);
   assert.equal(dl.status, 200);
+
+  // Test action: 'download' without recipientEmail
+  const downloaded = await admin.post('/api/cf-issues').send({
+    templateId: tpl.body.template._id,
+    action: 'download',
+    fields: {
+      partyName: 'Direct Download Partner',
+      partyAddress: 'Road 5, Bengaluru',
+      territory: 'Karnataka'
+    }
+  });
+  assert.equal(downloaded.status, 201);
+  assert.equal(downloaded.body.issue.status, 'generated');
+  assert.ok(downloaded.body.issue.pdfFileUrl);
+  const dl2 = await admin.get(`/api/cf-issues/${downloaded.body.issue._id}/pdf`);
+  assert.equal(dl2.status, 200);
+});
+
+test('C&F issue — uploaded multi-page template preserves pages and appends schedule', async () => {
+  const { admin } = await setup();
+  const testDoc = await PDFDocument.create();
+  testDoc.addPage([600, 800]);
+  testDoc.addPage([600, 800]);
+  testDoc.addPage([600, 800]);
+  const pdfBytes = Buffer.from(await testDoc.save());
+
+  const tpl = await admin
+    .post('/api/cf-templates')
+    .field('type', 'CFAgent')
+    .field('name', 'C&F 3-Page Agreement')
+    .attach('file', pdfBytes, { filename: 'custom_cf.pdf', contentType: 'application/pdf' });
+  assert.equal(tpl.status, 201);
+
+  const issued = await admin.post('/api/cf-issues').send({
+    templateId: tpl.body.template._id,
+    action: 'download',
+    fields: {
+      partyName: 'Apex Healthcare Agency',
+      partyAddress: 'Plot 88, Genome Valley, Hyderabad',
+      territory: 'Andhra Pradesh'
+    }
+  });
+  assert.equal(issued.status, 201);
+  assert.ok(issued.body.issue.pdfFileUrl);
+
+  const dl = await admin.get(`/api/cf-issues/${issued.body.issue._id}/pdf`);
+  assert.equal(dl.status, 200);
+
+  const parsed = await PDFDocument.load(dl.body);
+  assert.equal(parsed.getPageCount(), 4); // 3 original template pages + 1 Schedule page!
 });
 
 test('Bulk attendance — mark many employees for a day in one call', async () => {

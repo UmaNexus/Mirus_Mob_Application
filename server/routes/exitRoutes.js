@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import {
-  initiateExit, listExits, getExit, updateExit, generateExitLetters, deleteExit
+  initiateExit, listExits, getExit, updateExit, generateExitLetters, downloadFNFLetter, deleteExit
 } from '../controllers/exitController.js';
 import { verifyToken, requirePermission } from '../middleware/authMiddleware.js';
 import { PERMISSIONS } from '../config/permissions.js';
@@ -11,6 +11,7 @@ router.use(verifyToken, requirePermission(PERMISSIONS.EXIT_MANAGE));
 router.post('/', initiateExit);
 router.get('/', listExits);
 router.get('/:id', getExit);
+router.get('/:id/fnf', downloadFNFLetter);
 router.patch('/:id', updateExit);
 router.post('/:id/letters', generateExitLetters);
 router.delete('/:id', deleteExit);

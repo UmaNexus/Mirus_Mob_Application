@@ -344,14 +344,14 @@ export default function CompanySettingsPage() {
         <Card className="lg:col-span-2"><CardBody>
           <h3 className="mb-3 text-base font-semibold text-ink">Seal &amp; branding assets</h3>
           <p className="mb-3 text-xs text-muted">
-            Logo, stamp and signature are printed onto issued PDFs. Prefer &quot;Company Logo with stamp&quot;
+            Logo, stamp and signature are printed onto issued PDFs. Prefer &quot;Company Stamp and Signature &quot;
             when you have a combined seal image. Click View to confirm uploads.
           </p>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
             {assetUpload('logo', 'Company logo', form.branding.logoUrl, Building2)}
             {assetUpload('stamp', 'Company stamp', form.branding.stampUrl, Stamp)}
-            {assetUpload('logoWithStamp', 'Company Logo with stamp', form.branding.logoWithStampUrl, Stamp, {
-              hint: 'Combined logo + stamp image used on letter seals when available.'
+            {assetUpload('logoWithStamp', 'Company Stamp and Signature', form.branding.logoWithStampUrl, Stamp, {
+              hint: 'Combined  stamp + siggnature image used on letter seals when available.'
             })}
             {assetUpload('signature', 'Authorized signature', form.branding.signatureUrl, PenTool)}
           </div>

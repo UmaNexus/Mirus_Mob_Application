@@ -48,6 +48,8 @@ const resolveAssetPath = (relMaybe) => {
   if (!relMaybe) return null;
   const candidates = [
     path.resolve(ROOT, relMaybe),
+    path.resolve(ROOT, 'data', relMaybe),
+    path.resolve(ROOT, '..', 'data', relMaybe),
     path.resolve(relMaybe),
     path.resolve('/app', relMaybe)
   ];
@@ -313,7 +315,7 @@ const parseBoldMarks = (str) => {
   return segments.length ? segments : [{ text: s, bold: false }];
 };
 
-const formatOfferDate = (d) => {
+export const formatOfferDate = (d) => {
   const dt = new Date(d);
   if (Number.isNaN(dt.getTime())) return String(d || '');
   return `${dt.getDate()} ${MONTHS[dt.getMonth() + 1]} ${dt.getFullYear()}`;
@@ -954,7 +956,7 @@ export const generateOfferLetterPdf = async ({
     { text: 'Travel / Conveyance: ', bold: true },
     { text: 'Reimbursement of actual expenses as per Company policy (with supporting bills).', bold: false }
   ], { size: 10, gap: 18 });
-  // Role-based travel/other allowance (BDM / ASM / RBM only — not Admin, HR, IT).
+  // Role-based travel/other allowance (BDM / ASM / RSM only — not Admin, HR, IT).
   const travelAllowance = getOfferTravelAllowanceLine(position, department);
   if (travelAllowance) {
     writeRich([
@@ -1481,7 +1483,7 @@ export const generateCompanyDocPdf = async ({ title, paragraphs, company, employ
   };
 
   write(String(title || 'Document').toUpperCase(), { size: 13, bold: true, gap: 22 });
-  write(`Date: ${new Date(effectiveDate || Date.now()).toDateString()}`, { size: 10, gap: 16 });
+  write(`Date: ${formatOfferDate(effectiveDate || Date.now())}`, { size: 10, gap: 16 });
   if (employeeName) {
     write(`To: ${employeeName}${designation ? `, ${designation}` : ''}`, { size: 10, gap: 20 });
   }
@@ -1554,38 +1556,103 @@ export const applyCompanySeal = async (sourceRelPath, company, { destDir = GENER
   const sourceAbs = path.resolve(ROOT, sourceRelPath);
   if (!fs.existsSync(sourceAbs)) throw new ApiError(404, 'Source PDF not found');
 
-  const doc = await PDFDocument.load(await fsp.readFile(sourceAbs));
+  const bytes = await fsp.readFile(sourceAbs);
+  const doc = await PDFDocument.load(bytes);
   const pages = doc.getPages();
   const page = pages[pages.length - 1];
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const black = rgb(0.1, 0.1, 0.1);
 
-  const logoWithStamp = await loadImage(doc, company?.branding?.logoWithStampUrl);
-  const stamp = await loadImage(doc, company?.branding?.stampUrl);
-  if (logoWithStamp) {
-    const d = logoWithStamp.scaleToFit(110, 110);
-    page.drawImage(logoWithStamp, { x: 410, y: 70, width: d.width, height: d.height, opacity: 0.95 });
-  } else if (stamp) {
-    const d = stamp.scaleToFit(100, 100);
-    page.drawImage(stamp, { x: 420, y: 80, width: d.width, height: d.height, opacity: 0.9 });
+  // Locate the closing / sign-off block in the template text layer.
+  let signOffX = 40;
+  let signOffLowestY = null;
+  let hasAuthorizedSignatoryText = false;
+
+  try {
+    const { getDocumentProxy } = await import('unpdf');
+    const pdf = await getDocumentProxy(new Uint8Array(bytes));
+    const textPage = await pdf.getPage(pages.length);
+    const content = await textPage.getTextContent();
+    for (const item of content.items || []) {
+      const s = String(item.str || '').trim();
+      if (!s) continue;
+      const x = Number(item.transform?.[4]) || 0;
+      const y = Number(item.transform?.[5]) || 0;
+      // Skip running headers (>600) and footers (<70)
+      if (y < 70 || y > 600) continue;
+
+      if (/authorized\s+signatory/i.test(s)) {
+        hasAuthorizedSignatoryText = true;
+        signOffX = x || signOffX;
+        signOffLowestY = signOffLowestY === null ? y : Math.min(signOffLowestY, y);
+      } else if (/^(yours\s+(sincerely|faithfully|truly)|human\s+resources|hr\s+department|for\s+)/i.test(s)) {
+        signOffX = x || signOffX;
+        signOffLowestY = signOffLowestY === null ? y : Math.min(signOffLowestY, y);
+      }
+    }
+  } catch {
+    /* fallback to defaults */
   }
-  const sig = await loadImage(doc, company?.branding?.signatureUrl);
-  if (sig) {
-    const d = sig.scaleToFit(150, 50);
-    page.drawImage(sig, { x: 40, y: 110, width: d.width, height: d.height });
+
+  const [sig, logoWithStamp, stamp] = await Promise.all([
+    loadImage(doc, company?.branding?.signatureUrl),
+    loadImage(doc, company?.branding?.logoWithStampUrl),
+    loadImage(doc, company?.branding?.stampUrl)
+  ]);
+  const seal = logoWithStamp || stamp;
+
+  // When a combined "Company Stamp and Signature" asset (logoWithStamp) is present,
+  // omit the standalone signature — the combined seal already includes both.
+  const shouldDrawSig = Boolean(sig && !logoWithStamp);
+
+  // Position signature and stamp together at the sign-off block (side-by-side under the closing section)
+  const marginX = Math.max(20, signOffX);
+  let sigD = null;
+  let sigX = marginX;
+  let sigY = signOffLowestY !== null ? Math.max(65, signOffLowestY - 50) : 110;
+
+  if (shouldDrawSig) {
+    sigD = sig.scaleToFit(130, 44);
+    sigY = signOffLowestY !== null ? Math.max(65, signOffLowestY - sigD.height - 8) : 110;
+    page.drawImage(sig, {
+      x: sigX,
+      y: sigY,
+      width: sigD.width,
+      height: sigD.height
+    });
   }
-  if (company?.branding?.authorizedSignatoryName || sig || stamp || logoWithStamp) {
-    page.drawLine({ start: { x: 40, y: 105 }, end: { x: 220, y: 105 }, thickness: 1, color: black });
+
+  let sealD = null;
+  let sealY = 85;
+  if (seal) {
+    sealD = seal.scaleToFit(85, 85);
+    const sealX = sigD ? sigX + sigD.width + 16 : marginX;
+    sealY = signOffLowestY !== null ? Math.max(60, signOffLowestY - sealD.height - 4) : 85;
+    page.drawImage(seal, {
+      x: sealX,
+      y: sealY,
+      width: sealD.width,
+      height: sealD.height,
+      opacity: 0.95
+    });
+  }
+
+  // Only draw "Authorized Signatory" line and text if the template does NOT already have it
+  if (!hasAuthorizedSignatoryText && (company?.branding?.authorizedSignatoryName || shouldDrawSig || seal)) {
+    const lowestAssetY = Math.min(...[sigD ? sigY : null, sealD ? sealY : null].filter((v) => v !== null));
+    const lineY = (lowestAssetY !== null ? lowestAssetY : sigY) - 6;
+    page.drawLine({ start: { x: marginX, y: lineY }, end: { x: marginX + 160, y: lineY }, thickness: 1, color: black });
     page.drawText(ascii(`Authorized Signatory: ${company?.branding?.authorizedSignatoryName || ''}`), {
-      x: 40, y: 90, size: 9, font, color: black
+      x: marginX, y: lineY - 14, size: 9, font, color: black
     });
     if (company?.branding?.authorizedSignatoryDesignation) {
       page.drawText(ascii(company.branding.authorizedSignatoryDesignation), {
-        x: 40, y: 76, size: 8, font, color: rgb(0.3, 0.3, 0.3)
+        x: marginX, y: lineY - 26, size: 8, font, color: rgb(0.3, 0.3, 0.3)
       });
     }
   }
 
+  fs.mkdirSync(destDir, { recursive: true });
   const file = path.join(destDir, `sealed-${crypto.randomUUID()}.pdf`);
   await fsp.writeFile(file, await doc.save());
   return relPath(file);
@@ -1867,18 +1934,22 @@ export const fillTextPlaceholderPdf = async (
     (useBold ? bold : font).widthOfTextAtSize(ascii(text), size);
 
   const blankFieldReplacement = (templateStr) => {
+    // If the string already contains {{placeholder}}, do not perform blank underline replacement
+    // so explicit placeholders like "Date: {{date}}" are never double-replaced.
+    if (/\{\{[^}]+\}\}/.test(templateStr)) return templateStr;
+
     const labelPatterns = [
-      { key: 'employeeName', regex: /(Employee\s*(?:Name|Full\s*Name)|Name)\s*:\s*[_\s]+/i },
-      { key: 'amount', regex: /Amount\s*:\s*[_\s]+/i },
-      { key: 'reason', regex: /Reason\s*:\s*[_\s]+/i },
-      { key: 'lastWorkingDay', regex: /Last\s*Working\s*Day\s*:\s*[_\s]+/i },
-      { key: 'date', regex: /Date\s*:\s*[_\s]+/i }
+      { key: 'employeeName', regex: /(Employee\s*(?:Name|Full\s*Name)|Name)\s*:\s*_{2,}/i },
+      { key: 'amount', regex: /Amount\s*:\s*_{2,}/i },
+      { key: 'reason', regex: /Reason\s*:\s*_{2,}/i },
+      { key: 'lastWorkingDay', regex: /Last\s*Working\s*Day\s*:\s*_{2,}/i },
+      { key: 'date', regex: /Date\s*:\s*_{2,}/i }
     ];
     for (const item of labelPatterns) {
       if (!item.regex.test(templateStr)) continue;
       const value = resolveLetterField(item.key, fieldValues) || '';
       const replaced = templateStr.replace(item.regex, (match) => {
-        const label = match.replace(/[_\s]+$/i, '').trim();
+        const label = match.replace(/:\s*_{2,}\s*$/i, '').trim();
         return `${label}: ${value}`;
       });
       return replaced;
@@ -1948,16 +2019,17 @@ export const fillTextPlaceholderPdf = async (
     return lines.length ? lines : [[{ text: '', bold: false }]];
   };
 
+  const plannedRuns = [];
+
   for (const run of runs) {
     const page = pages[run.pageIndex];
     if (!page) continue;
     const desiredSize = Math.max(8, Number(run.fontSize) || 12);
     const template = String(run.str || '');
-    const normalized = blankFieldReplacement(template);
-    const segments = toSegments(normalized);
+    const segments = toSegments(template);
     if (!segments.length) continue;
 
-    const looksRightAligned = run.x > pageWidth * 0.55 || /^date\s*:/i.test(template.trim());
+    const looksRightAligned = run.x > pageWidth * 0.55;
     const rightEdge = run.x + run.width;
     const maxWidth = Math.max(60, pageWidth - (looksRightAligned ? rightMargin : run.x) - rightMargin);
     const isPurePlaceholder = /^\{\{\s*[^}]+\s*\}\}$/.test(template.trim());
@@ -1980,29 +2052,59 @@ export const fillTextPlaceholderPdf = async (
       ? Math.max(rightMargin, rightEdge - firstW)
       : run.x;
 
-    // Cover the whole original run once — avoids mid-word white gaps.
-    page.drawRectangle({
-      x: Math.min(run.x, startX) - 1,
-      y: run.y - size * 0.28 - (lines.length - 1) * lineGap,
-      width: Math.max(widest, run.width) + 6,
-      height: lineGap * lines.length + size * 0.2,
+    // Font cap-height ~0.73, descent ~0.22 -> total single-line height ~0.95 * size.
+    // White box covers strictly from bottom line's descent to top line's cap-height,
+    // so it NEVER bleeds into the line above.
+    const descent = size * 0.22;
+    const capHeight = size * 0.73;
+    const boxHeight = (lines.length - 1) * lineGap + (capHeight + descent);
+    const boxY = run.y - descent - (lines.length - 1) * lineGap;
+    const boxX = Math.min(run.x, startX) - 1;
+    const boxWidth = Math.max(widest, run.width) + 4;
+
+    plannedRuns.push({
+      page,
+      run,
+      lines,
+      size,
+      lineGap,
+      startX,
+      looksRightAligned,
+      rightEdge,
+      boxX,
+      boxY,
+      boxWidth,
+      boxHeight
+    });
+  }
+
+  // Pass 1: Draw all white background boxes so none can occlude text drawn in Pass 2
+  for (const item of plannedRuns) {
+    item.page.drawRectangle({
+      x: item.boxX,
+      y: item.boxY,
+      width: item.boxWidth,
+      height: item.boxHeight,
       color: white,
       borderWidth: 0
     });
+  }
 
-    let y = run.y;
-    for (const line of lines) {
-      let x = looksRightAligned
-        ? Math.max(rightMargin, rightEdge - measure(line, size))
-        : startX;
+  // Pass 2: Draw all text on top of the clean white boxes
+  for (const item of plannedRuns) {
+    let y = item.run.y;
+    for (const line of item.lines) {
+      let x = item.looksRightAligned
+        ? Math.max(rightMargin, item.rightEdge - measure(line, item.size))
+        : item.startX;
       for (const seg of line) {
         const t = ascii(seg.text);
         if (!t) continue;
         const f = seg.bold ? bold : font;
-        page.drawText(t, { x, y, size, font: f, color: ink });
-        x += f.widthOfTextAtSize(t, size);
+        item.page.drawText(t, { x, y, size: item.size, font: f, color: ink });
+        x += f.widthOfTextAtSize(t, item.size);
       }
-      y -= lineGap;
+      y -= item.lineGap;
     }
   }
 
@@ -2043,9 +2145,22 @@ export const fillAcroFormPdf = async (sourceRelPath, fieldValues = {}) => {
   return relPath(file);
 };
 
+export const resolveTemplateFilePath = (relOrAbs) => {
+  if (!relOrAbs) return null;
+  if (path.isAbsolute(relOrAbs) && fs.existsSync(relOrAbs)) return relOrAbs;
+  const candidates = [
+    path.resolve(ROOT, relOrAbs),
+    path.resolve(relOrAbs),
+    path.resolve(ROOT, '..', 'data', relOrAbs),
+    path.resolve(ROOT, 'data', relOrAbs),
+    path.resolve('/app', relOrAbs)
+  ];
+  return candidates.find((p) => fs.existsSync(p)) || null;
+};
+
 /** True when the PDF has at least one AcroForm field. */
 export const pdfHasAcroForms = async (sourceRelPath) => {
-  const sourceAbs = path.resolve(ROOT, sourceRelPath);
+  const sourceAbs = resolveTemplateFilePath(sourceRelPath) || path.resolve(ROOT, sourceRelPath);
   if (!fs.existsSync(sourceAbs)) return false;
   try {
     const doc = await PDFDocument.load(await fsp.readFile(sourceAbs));
@@ -2056,35 +2171,219 @@ export const pdfHasAcroForms = async (sourceRelPath) => {
 };
 
 /**
+ * Fill an uploaded C&F agreement PDF template.
+ * Preserves all original pages of the template document, overlays filled blank fields
+ * (party name, registered office address, territory, execution date, witnesses),
+ * and appends an official executed Schedule I (Commercial Terms & Appointment Particulars) sheet.
+ */
+export const fillTemplateCFAgreementPdf = async ({
+  templateAbsPath,
+  fields = {},
+  company,
+  templateTitle
+}) => {
+  const v = (k, fallback = '') => String(fields[k] ?? fallback).trim();
+  let bytes;
+  try {
+    bytes = await fsp.readFile(templateAbsPath);
+  } catch {
+    return null;
+  }
+
+  let doc;
+  try {
+    doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    if (doc.getPageCount() === 0) return null;
+  } catch (err) {
+    console.warn('C&F uploaded template could not be loaded as PDF Document:', err?.message);
+    return null;
+  }
+
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+
+  // Overlay detected blank lines or placeholders on the existing pages
+  try {
+    const { getDocumentProxy } = await import('unpdf');
+    const unDoc = await getDocumentProxy(new Uint8Array(bytes));
+    const pageCount = Math.min(doc.getPageCount(), unDoc.numPages);
+
+    for (let pageIdx = 0; pageIdx < pageCount; pageIdx++) {
+      const page = await unDoc.getPage(pageIdx + 1);
+      const textContent = await page.getTextContent();
+      const pdfPage = doc.getPage(pageIdx);
+
+      for (const it of textContent.items || []) {
+        const str = String(it.str || '');
+        const x = it.transform?.[4] || 20;
+        const y = it.transform?.[5] || 100;
+        const h = Math.max(it.height || 12, 10);
+        const w = it.width || 100;
+
+        if (/AND\s*[\.\s]{4,}/i.test(str)) {
+          // Party Name on preamble
+          if (fields.partyName) {
+            pdfPage.drawRectangle({ x: x + 35, y: y - 2, width: 230, height: h + 4, color: rgb(1, 1, 1) });
+            pdfPage.drawText(ascii(fields.partyName), { x: x + 37, y, size: 9.5, font: bold, color: rgb(0.1, 0.1, 0.1) });
+          }
+        } else if (/Office[\.\s]{4,}/i.test(str)) {
+          // Party Address
+          if (fields.partyAddress) {
+            pdfPage.drawRectangle({ x: x + 38, y: y - 2, width: Math.max(w - 60, 220), height: h + 4, color: rgb(1, 1, 1) });
+            pdfPage.drawText(ascii(fields.partyAddress.slice(0, 75)), { x: x + 40, y, size: 8.5, font: bold, color: rgb(0.1, 0.1, 0.1) });
+          }
+        } else if (/by\s*[\.\s]{4,}.*?Partner/i.test(str)) {
+          // Representative / Partner
+          const rep = fields.witness1 || fields.partyName;
+          if (rep) {
+            pdfPage.drawRectangle({ x: x + 16, y: y - 2, width: 200, height: h + 4, color: rgb(1, 1, 1) });
+            pdfPage.drawText(ascii(rep), { x: x + 18, y, size: 9.5, font: bold, color: rgb(0.1, 0.1, 0.1) });
+          }
+        } else if (/State of\s*[-_\.\s]{3,}/i.test(str)) {
+          // Territory in body
+          if (fields.territory) {
+            pdfPage.drawRectangle({ x: x + 380, y: y - 2, width: 90, height: h + 4, color: rgb(1, 1, 1) });
+            pdfPage.drawText(ascii(fields.territory), { x: x + 382, y, size: 9.5, font: bold, color: rgb(0.1, 0.1, 0.1) });
+          }
+        } else if (/[-_]{4,}\s*and the Company has agreed/i.test(str)) {
+          // Territory on recital
+          if (fields.territory) {
+            pdfPage.drawRectangle({ x, y: y - 2, width: 70, height: h + 4, color: rgb(1, 1, 1) });
+            pdfPage.drawText(ascii(fields.territory), { x: x + 2, y, size: 9.5, font: bold, color: rgb(0.1, 0.1, 0.1) });
+          }
+        } else if (/effective from\s*[\.\s]{3,}/i.test(str)) {
+          // Effective date
+          const dateStr = [fields.agreementDay, fields.agreementMonth, fields.agreementYear ? `20${fields.agreementYear}` : ''].filter(Boolean).join(' ');
+          if (dateStr) {
+            pdfPage.drawRectangle({ x: x + 120, y: y - 2, width: 110, height: h + 4, color: rgb(1, 1, 1) });
+            pdfPage.drawText(ascii(dateStr), { x: x + 122, y, size: 9.5, font: bold, color: rgb(0.1, 0.1, 0.1) });
+          }
+        } else if (/Named Agent\s*[\.\s]{4,}/i.test(str)) {
+          // Agent sign on signing page
+          if (fields.partyName) {
+            pdfPage.drawRectangle({ x: x + 230, y: y - 2, width: 220, height: h + 4, color: rgb(1, 1, 1) });
+            pdfPage.drawText(ascii(fields.partyName), { x: x + 232, y, size: 9.5, font: bold, color: rgb(0.1, 0.1, 0.1) });
+          }
+        } else if (/Through its Partner\s*[\.\s]{4,}/i.test(str)) {
+          // Partner sign on signing page
+          const partner = fields.witness1 || fields.partyName;
+          if (partner) {
+            pdfPage.drawRectangle({ x, y: y - 2, width: 140, height: h + 4, color: rgb(1, 1, 1) });
+            pdfPage.drawText(ascii(partner), { x: x + 2, y, size: 9.5, font: bold, color: rgb(0.1, 0.1, 0.1) });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('C&F PDF text analysis overlay warning:', err?.message || err);
+  }
+
+  // Append official executed Schedule of Commercial Terms & Appointment Particulars
+  const schedPage = doc.addPage([595.2, 841.92]);
+  const companyName = company?.name || 'Mirus Med Sciences Private Limited';
+  const partyName = v('partyName', 'C&F Agency');
+  const executionDate = [v('agreementDay'), v('agreementMonth'), v('agreementYear') ? `20${v('agreementYear')}` : ''].filter(Boolean).join(' ') || 'As Executed';
+
+  schedPage.drawText('SCHEDULE I: APPOINTMENT PARTICULARS & COMMERCIAL TERMS', {
+    x: 48,
+    y: 790,
+    size: 13,
+    font: bold,
+    color: rgb(0.1, 0.2, 0.4)
+  });
+  schedPage.drawText(ascii(`${templateTitle || 'C&F Agency Agreement'} — Executed Particulars`), {
+    x: 48,
+    y: 772,
+    size: 10,
+    font,
+    color: rgb(0.3, 0.3, 0.3)
+  });
+
+  const particulars = [
+    ['C&F Agency Name', partyName],
+    ['Registered Office / Address', v('partyAddress', '—')],
+    ['Assigned Territory', v('territory', '—')],
+    ['Agreement Execution Date', executionDate],
+    ['Place of Execution', v('agreementPlace', '—')],
+    ['Agency Trade Margin', v('margin', '—')],
+    ['Godown / Warehouse Address', v('godownAddress', '—')],
+    ['Monthly Sales Target', v('monthlyTarget', '—')],
+    ['Security Deposit', v('securityDeposit', '—')],
+    ['Official Contact Email', v('recipientEmail', '—')],
+    ['Witness 1', v('witness1', '—')],
+    ['Witness 2', v('witness2', '—')]
+  ];
+
+  let curY = 730;
+  for (const [lbl, val] of particulars) {
+    schedPage.drawRectangle({ x: 48, y: curY - 4, width: 499, height: 22, color: rgb(0.96, 0.97, 0.99) });
+    schedPage.drawText(ascii(lbl), { x: 56, y: curY + 2, size: 9.5, font: bold, color: rgb(0.15, 0.2, 0.3) });
+    schedPage.drawText(ascii(String(val || '—').slice(0, 60)), { x: 230, y: curY + 2, size: 9.5, font, color: rgb(0.1, 0.1, 0.1) });
+    curY -= 26;
+  }
+
+  curY -= 26;
+  schedPage.drawText(ascii(`For ${companyName}`), { x: 48, y: curY, size: 10, font: bold, color: rgb(0.1, 0.1, 0.1) });
+  schedPage.drawText(ascii(`For ${partyName}`), { x: 330, y: curY, size: 10, font: bold, color: rgb(0.1, 0.1, 0.1) });
+  curY -= 36;
+  schedPage.drawText('___________________________________', { x: 48, y: curY, size: 10, font, color: rgb(0.5, 0.5, 0.5) });
+  schedPage.drawText('___________________________________', { x: 330, y: curY, size: 10, font, color: rgb(0.5, 0.5, 0.5) });
+  curY -= 14;
+  schedPage.drawText('Authorized Signatory', { x: 48, y: curY, size: 9, font, color: rgb(0.3, 0.3, 0.3) });
+  schedPage.drawText('Authorized Signatory / Partner', { x: 330, y: curY, size: 9, font, color: rgb(0.3, 0.3, 0.3) });
+
+  const dest = path.join(CF_ISSUED_DIR, `cf-${crypto.randomUUID()}.pdf`);
+  await fsp.writeFile(dest, await doc.save());
+  return relPath(dest);
+};
+
+/**
  * Generate a filled C&F agreement PDF.
  * Prefers filling AcroForm fields on the uploaded template when present;
- * otherwise renders a complete agreement page with the blank values inserted.
+ * otherwise overlays blank fields and appends Schedule I to the uploaded template document;
+ * falls back to generating a synthetic agreement page only when no template file was uploaded or file is invalid.
  * @returns {Promise<string>} repo-relative path
  */
 export const generateCFAgreementPdf = async ({ type, fields = {}, company, templateTitle, templateFileUrl }) => {
   const v = (k, fallback = '') => String(fields[k] ?? fallback).trim();
 
-  if (templateFileUrl && (await pdfHasAcroForms(templateFileUrl))) {
-    const filled = await fillAcroFormPdf(templateFileUrl, fields);
-    // Move/copy into cf-issued for a stable issued-docs location.
-    const bytes = await fsp.readFile(path.resolve(ROOT, filled));
-    const dest = path.join(CF_ISSUED_DIR, `cf-${crypto.randomUUID()}.pdf`);
-    await fsp.writeFile(dest, bytes);
-    try { await fsp.unlink(path.resolve(ROOT, filled)); } catch { /* ignore */ }
-    return relPath(dest);
+  // If a template file URL is provided, locate and fill the actual uploaded document
+  const templateAbsPath = templateFileUrl ? resolveTemplateFilePath(templateFileUrl) : null;
+
+  if (templateAbsPath) {
+    if (await pdfHasAcroForms(templateFileUrl)) {
+      try {
+        const filled = await fillAcroFormPdf(templateFileUrl, fields);
+        const filledAbs = resolveTemplateFilePath(filled) || path.resolve(ROOT, filled);
+        const bytes = await fsp.readFile(filledAbs);
+        const dest = path.join(CF_ISSUED_DIR, `cf-${crypto.randomUUID()}.pdf`);
+        await fsp.writeFile(dest, bytes);
+        try { await fsp.unlink(filledAbs); } catch { /* ignore */ }
+        return relPath(dest);
+      } catch (err) {
+        console.warn('fillAcroFormPdf failed, falling back:', err?.message);
+      }
+    }
+
+    // Fill uploaded PDF template (preserves all original pages, overlays text, appends Schedule I)
+    const filledPath = await fillTemplateCFAgreementPdf({
+      templateAbsPath,
+      fields,
+      company,
+      templateTitle
+    });
+    if (filledPath) {
+      return filledPath;
+    }
   }
 
   const companyName = company?.name || 'Mirus Med Sciences Private Limited';
   const typeTitles = {
-    CFAgent: 'C & F AGENT AGREEMENT',
-    CFDistributor: 'C & F DISTRIBUTOR AGREEMENT',
-    CFWholesaler: 'C & F WHOLESALER AGREEMENT'
+    CFAgent: 'C & F AGENCY AGREEMENT'
   };
   const partyLabel = {
-    CFAgent: 'C & F Agent',
-    CFDistributor: 'C&F Distributor',
-    CFWholesaler: 'C&F Wholesaler'
-  }[type] || 'C&F Partner';
+    CFAgent: 'C & F Agency'
+  }[type] || 'C&F Agency';
 
   const title = templateTitle || typeTitles[type] || 'C & F AGREEMENT';
   const day = v('agreementDay', '____');

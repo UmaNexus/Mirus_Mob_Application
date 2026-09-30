@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
-import { Plus, FileDown, LogOut, Trash2 } from 'lucide-react';
+import { Plus, Mail, Download, LogOut, Trash2 } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import { Card, CardBody } from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
@@ -13,28 +13,39 @@ import EmployeeSelect from '../../components/feature/EmployeeSelect.jsx';
 import TablePager from '../../components/ui/TablePager.jsx';
 import useAsync from '../../hooks/useAsync.js';
 import useClientPager from '../../hooks/useClientPager.js';
-import { listExits, initiateExit, updateExit, generateExitLetters, deleteExit } from '../../api/exits.js';
+import { listExits, initiateExit, updateExit, generateExitLetters, deleteExit, downloadFNFLetter } from '../../api/exits.js';
 import { listUsers } from '../../api/users.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const fmt = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+const userDisplayName = (u) => {
+  if (!u || typeof u !== 'object') return '—';
+  const p = u.personalDetails;
+  const n = p ? `${p.firstName || ''} ${p.lastName || ''}`.trim() : '';
+  return n || u.email || '—';
+};
+const userEmpId = (u) => {
+  if (!u || typeof u !== 'object') return '—';
+  return u.employeeDetails?.employeeId || '—';
+};
 
 export default function ExitsPage() {
   const dispatch = useDispatch();
   const exits = useAsync(() => listExits(), []);
   const users = useAsync(() => listUsers({ limit: 500, employeesOnly: 'true' }), []);
   const pager = useClientPager(exits.data || [], 10);
+  const existingExitUserIds = (exits.data || [])
+    .map((r) => (typeof r.userId === 'object' && r.userId?._id ? r.userId._id : r.userId))
+    .filter(Boolean);
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState({ userId: '', resignationDate: today(), lastWorkingDay: today(), reason: '' });
   const [busy, setBusy] = useState(false);
   const [edit, setEdit] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
-  const [letterTarget, setLetterTarget] = useState(null);
-  const [fnfForm, setFnfForm] = useState({ amount: '', lastWorkingDay: today(), reason: '' });
-  const [previewUrl, setPreviewUrl] = useState('');
-  const [previewLoading, setPreviewLoading] = useState(false);
+  const [sendingMailId, setSendingMailId] = useState(null);
+  const [downloadingId, setDownloadingId] = useState(null);
 
   const employeeMap = useMemo(() => {
     const map = new Map();
@@ -48,7 +59,8 @@ export default function ExitsPage() {
     return (exits.data || [])
       .filter((r) => r.fnfLetterUrl || r.fnfSettlement?.status === 'Settled')
       .map((r) => {
-        const user = employeeMap.get(String(r.userId));
+        const uId = typeof r.userId === 'object' && r.userId?._id ? r.userId._id : r.userId;
+        const user = employeeMap.get(String(uId)) || (typeof r.userId === 'object' ? r.userId : null);
         const fullName = user ? `${user.personalDetails?.firstName || ''} ${user.personalDetails?.lastName || ''}`.trim() || user.email : 'Employee';
         const amount = Number(r.fnfSettlement?.amount ?? 0) || 0;
         const issuedAt = r.fnfSettlement?.settledAt || r.updatedAt || r.createdAt || r.lastWorkingDay;
@@ -76,52 +88,52 @@ export default function ExitsPage() {
     catch (err) { dispatch(notifyError(err.uiMessage)); }
     finally { setBusy(false); }
   };
-  const openLettersDialog = (r) => {
-    setLetterTarget(r);
-    setPreviewUrl('');
-    setFnfForm({
-      amount: r.fnfSettlement?.amount ? (Number(r.fnfSettlement.amount) / 100).toString() : '',
-      lastWorkingDay: r.lastWorkingDay ? r.lastWorkingDay.slice(0, 10) : today(),
-      reason: r.reason || ''
-    });
-  };
 
-  const previewLetter = async () => {
-    if (!letterTarget) return;
-    setPreviewLoading(true);
+  const handleSendMail = async (r) => {
+    setSendingMailId(r._id);
     try {
-      const res = await generateExitLetters(letterTarget._id, {
-        previewOnly: true,
-        fnfFields: {
-          amount: fnfForm.amount,
-          lastWorkingDay: fnfForm.lastWorkingDay,
-          reason: fnfForm.reason
-        }
-      });
-      setPreviewUrl(res.previewLetterUrl || res.fnfLetterUrl || '');
-      if (!res.previewLetterUrl && !res.fnfLetterUrl) {
-        dispatch(notifyError('Could not generate the letter preview.'));
-      }
-    } catch (err) { dispatch(notifyError(err.uiMessage)); }
-    finally { setPreviewLoading(false); }
-  };
-
-  const letters = async (e) => {
-    e.preventDefault();
-    if (!letterTarget) return;
-    try {
-      await generateExitLetters(letterTarget._id, {
-        fnfFields: {
-          amount: fnfForm.amount,
-          lastWorkingDay: fnfForm.lastWorkingDay,
-          reason: fnfForm.reason
-        }
-      });
-      dispatch(notifySuccess('Relieving, experience & F&F letters generated.'));
-      setPreviewUrl('');
-      setLetterTarget(null);
+      await generateExitLetters(r._id);
+      dispatch(notifySuccess('F&F settlement email sent to employee.'));
       exits.reload();
-    } catch (err) { dispatch(notifyError(err.uiMessage)); }
+    } catch (err) {
+      dispatch(notifyError(err.uiMessage || 'Failed to send F&F settlement email.'));
+    } finally {
+      setSendingMailId(null);
+    }
+  };
+
+  const handleDownload = async (record) => {
+    setDownloadingId(record._id);
+    try {
+      const res = await downloadFNFLetter(record._id);
+      const disposition = res.headers?.['content-disposition'];
+      let filename = 'FNF_Settlement.pdf';
+      if (disposition && disposition.includes('filename=')) {
+        const match = disposition.match(/filename="?([^"]+)"?/);
+        if (match && match[1]) filename = match[1];
+      }
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      let msg = err.uiMessage || 'Failed to download F&F letter.';
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const json = JSON.parse(text);
+          if (json.message) msg = json.message;
+        } catch {}
+      }
+      dispatch(notifyError(msg));
+    } finally {
+      setDownloadingId(null);
+    }
   };
   const saveEdit = async (e) => {
     e.preventDefault();
@@ -158,26 +170,41 @@ export default function ExitsPage() {
 
       <Card><CardBody>
         <table className="w-full text-sm">
-          <thead><tr className="text-left text-muted"><th className="pb-2">Resigned</th><th className="pb-2">Last day</th><th className="pb-2">F&amp;F</th><th className="pb-2">Status</th><th className="pb-2 text-right">Actions</th></tr></thead>
+          <thead>
+            <tr className="text-left text-muted">
+              <th className="pb-2">Employee</th>
+              <th className="pb-2">Emp ID</th>
+              <th className="pb-2">Resigned</th>
+              <th className="pb-2">Last day</th>
+              <th className="pb-2">F&amp;F</th>
+              <th className="pb-2">Status</th>
+              <th className="pb-2 text-right">Actions</th>
+            </tr>
+          </thead>
           <tbody>
             {pager.pageRows.map((r) => (
               <tr key={r._id} className="border-t border-line">
+                <td className="py-2 font-medium text-ink">{userDisplayName(r.userId)}</td>
+                <td className="py-2">{userEmpId(r.userId)}</td>
                 <td className="py-2">{fmt(r.resignationDate)}</td>
                 <td className="py-2">{fmt(r.lastWorkingDay)}</td>
                 <td className="py-2"><StatusBadge status={r.fnfSettlement?.status === 'Settled' ? 'paid' : 'pending'} label={r.fnfSettlement?.status || 'Pending'} /></td>
                 <td className="py-2"><StatusBadge status={r.status === 'Completed' ? 'active' : 'processing'} label={r.status} /></td>
                 <td className="py-2">
                   <div className="flex justify-end gap-1">
-                    <Button size="sm" variant="secondary" onClick={() => setEdit({ _id: r._id, status: r.status, interviewNotes: r.exitInterview?.notes || '', fnfRupees: r.fnfSettlement?.amount ? r.fnfSettlement.amount / 100 : '', fnfStatus: r.fnfSettlement?.status || 'Pending' })}>Manage</Button>
-                    <Button size="sm" onClick={() => openLettersDialog(r)}><FileDown size={14} /> Letters</Button>
-                    <button type="button" className="btn-ghost p-1 text-danger" onClick={() => setDeleteTarget(r)} aria-label="Delete exit">
-                      <Trash2 size={14} />
-                    </button>
+                    <Button size="sm" variant="secondary" onClick={() => setEdit({ _id: r._id, employeeName: userDisplayName(r.userId), status: r.status, interviewNotes: r.exitInterview?.notes || '', fnfRupees: r.fnfSettlement?.amount ? r.fnfSettlement.amount / 100 : '', fnfStatus: r.fnfSettlement?.status || 'Pending' })}>Manage</Button>
+                    <Button size="sm" onClick={() => handleSendMail(r)} disabled={sendingMailId === r._id}><Mail size={14} /> Send Mail</Button>
+                    <Button size="sm" variant="secondary" onClick={() => handleDownload(r)} disabled={downloadingId === r._id}><Download size={14} /> Download</Button>
+                    {r.status === 'Initiated' && !r.relievingLetterUrl && !r.experienceLetterUrl && (
+                      <button type="button" className="btn-ghost p-1 text-danger" onClick={() => setDeleteTarget(r)} aria-label="Delete exit">
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
             ))}
-            {!pager.total && <tr><td colSpan={5} className="py-8 text-center text-muted"><LogOut className="mx-auto mb-2 text-slate-300" /> No exits in progress.</td></tr>}
+            {!pager.total && <tr><td colSpan={7} className="py-8 text-center text-muted"><LogOut className="mx-auto mb-2 text-slate-300" /> No exits in progress.</td></tr>}
           </tbody>
         </table>
         <TablePager
@@ -203,7 +230,7 @@ export default function ExitsPage() {
                 <thead>
                   <tr className="text-left text-muted">
                     <th className="pb-2">Employee</th>
-                    <th className="pb-2">Employee ID</th>
+                    <th className="pb-2">Emp ID</th>
                     <th className="pb-2">Designation</th>
                     <th className="pb-2">Email</th>
                     <th className="pb-2">Issued date</th>
@@ -249,7 +276,7 @@ export default function ExitsPage() {
 
       <FormDialog open={createOpen} onClose={() => setCreateOpen(false)} title="Initiate exit" onSubmit={create} loading={busy} submitLabel="Initiate">
         <div className="space-y-3 py-1">
-          <EmployeeSelect value={form.userId} onChange={(v) => setForm({ ...form, userId: v })} />
+          <EmployeeSelect value={form.userId} onChange={(v) => setForm({ ...form, userId: v })} excludeIds={existingExitUserIds} />
           <div className="grid grid-cols-2 gap-3">
             <TextField type="date" size="small" label="Resignation date" InputLabelProps={{ shrink: true }} value={form.resignationDate} onChange={(e) => setForm({ ...form, resignationDate: e.target.value })} />
             <TextField type="date" size="small" label="Last working day" InputLabelProps={{ shrink: true }} value={form.lastWorkingDay} onChange={(e) => setForm({ ...form, lastWorkingDay: e.target.value })} />
@@ -258,7 +285,7 @@ export default function ExitsPage() {
         </div>
       </FormDialog>
 
-      <FormDialog open={Boolean(edit)} onClose={() => setEdit(null)} title="Manage exit" onSubmit={saveEdit} loading={busy} submitLabel="Save">
+      <FormDialog open={Boolean(edit)} onClose={() => setEdit(null)} title={edit?.employeeName ? `Manage exit — ${edit.employeeName}` : 'Manage exit'} onSubmit={saveEdit} loading={busy} submitLabel="Save">
         {edit && (
           <div className="space-y-3 py-1">
             <TextField select size="small" fullWidth label="Status" value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value })}>
@@ -273,32 +300,6 @@ export default function ExitsPage() {
             </div>
           </div>
         )}
-      </FormDialog>
-
-      <FormDialog open={Boolean(letterTarget)} onClose={() => setLetterTarget(null)} title="Issue F&F settlement" onSubmit={letters} loading={busy} submitLabel={previewUrl ? 'Confirm & send' : 'Issue letter'}>
-        <div className="space-y-3 py-1">
-          <TextField size="small" fullWidth label="F&F amount (₹)" type="number" value={fnfForm.amount} onChange={(e) => setFnfForm({ ...fnfForm, amount: e.target.value })} />
-          <TextField type="date" size="small" label="Last working day" InputLabelProps={{ shrink: true }} value={fnfForm.lastWorkingDay} onChange={(e) => setFnfForm({ ...fnfForm, lastWorkingDay: e.target.value })} />
-          <TextField size="small" fullWidth label="Settlement reason" value={fnfForm.reason} onChange={(e) => setFnfForm({ ...fnfForm, reason: e.target.value })} />
-
-          <div className="flex gap-2 pt-1">
-            <Button type="button" variant="secondary" onClick={previewLetter} disabled={previewLoading}>
-              {previewLoading ? 'Generating preview...' : 'Preview letter'}
-            </Button>
-            {previewUrl && (
-              <a href={previewUrl} target="_blank" rel="noreferrer" className="inline-flex items-center text-sm font-medium text-primary-600 hover:underline">
-                Open preview
-              </a>
-            )}
-          </div>
-
-          {previewUrl && (
-            <div className="overflow-hidden rounded-lg border border-line bg-white">
-              <div className="border-b border-line bg-surface px-3 py-2 text-sm font-medium text-ink">Settlement letter preview</div>
-              <iframe title="F&F settlement preview" src={previewUrl} className="h-[420px] w-full bg-white" />
-            </div>
-          )}
-        </div>
       </FormDialog>
 
       <ConfirmDialog

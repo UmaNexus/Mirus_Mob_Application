@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
@@ -49,6 +50,20 @@ export default function AttendanceAdminPage() {
   const [uploadDate, setUploadDate] = useState(today());
   const [hol, setHol] = useState({ date: today(), name: '' });
   const [registerKey, setRegisterKey] = useState(0);
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.hash) {
+      const targetId = location.hash.replace('#', '');
+      const timer = setTimeout(() => {
+        const el = document.getElementById(targetId);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [location.hash]);
 
   const saveAtt = async () => {
     if (!att.userId) return dispatch(notifyError('Select an employee.'));
@@ -243,7 +258,7 @@ export default function AttendanceAdminPage() {
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card><CardBody>
+        <Card id="holiday-calendar" className="scroll-mt-6"><CardBody>
           <h3 className="mb-3 flex items-center gap-2 text-base font-semibold text-ink"><CalendarDays size={18} className="text-primary-600" /> Holiday calendar</h3>
           <div className="mb-3 flex items-end gap-2">
             <TextField type="date" size="small" label="Date" InputLabelProps={{ shrink: true }} value={hol.date} onChange={(e) => setHol({ ...hol, date: e.target.value })} />

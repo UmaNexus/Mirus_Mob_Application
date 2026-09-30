@@ -2,6 +2,13 @@ FROM node:18-alpine
 
 WORKDIR /app
 
+# Install LibreOffice and standard fonts for DOCX-to-PDF conversion
+RUN apk add --no-cache \
+  libreoffice \
+  libreoffice-writer \
+  font-noto \
+  font-liberation
+
 # Copy package files
 COPY package*.json ./
 

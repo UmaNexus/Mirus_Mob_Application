@@ -5,8 +5,49 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { fileURLToPath } from 'node:url';
 import connectDB from '../config/db.js';
 import Company, { PLATFORM_SLUG } from '../models/Company.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const SEED_ASSETS_DIR = path.join(__dirname, 'assets');
+
+/**
+ * Copy a permanent seed asset from server/seed/assets into uploads directories,
+ * ensuring it is present across both runtime container mounts and host data folders.
+ */
+const copySeedAssetToUploads = (sourceFilename, subDir, destFilename) => {
+  const candidateSources = [
+    path.join(SEED_ASSETS_DIR, sourceFilename),
+    path.resolve(process.cwd(), sourceFilename),
+    path.resolve(process.cwd(), '..', sourceFilename),
+    path.resolve('uploads', subDir, sourceFilename),
+    path.resolve(process.cwd(), 'data', 'uploads', subDir, sourceFilename),
+    path.resolve(process.cwd(), '..', 'data', 'uploads', subDir, sourceFilename)
+  ];
+  const srcPath = candidateSources.find((p) => fs.existsSync(p));
+  if (!srcPath) return null;
+
+  const targetDirs = [
+    path.resolve('uploads', subDir),
+    path.resolve(process.cwd(), 'data', 'uploads', subDir),
+    path.resolve(process.cwd(), '..', 'data', 'uploads', subDir)
+  ];
+
+  let written = false;
+  for (const td of targetDirs) {
+    try {
+      fs.mkdirSync(td, { recursive: true });
+      fs.copyFileSync(srcPath, path.join(td, destFilename));
+      written = true;
+    } catch {
+      // ignore
+    }
+  }
+
+  return written ? `uploads/${subDir}/${destFilename}` : null;
+};
 import User from '../models/User.js';
 import SalaryStructureTemplate from '../models/SalaryStructureTemplate.js';
 import EmployeeSalaryAssignment from '../models/EmployeeSalaryAssignment.js';
@@ -151,9 +192,19 @@ const run = async () => {
   });
 
   // --- Demo company with statutory config + branding ---
+  const logoRel = copySeedAssetToUploads('mirus-logo.jpg', 'company', 'mirus-logo.jpg');
+  const stampRel = copySeedAssetToUploads('mirus-stamp.jpg', 'company', 'mirus-stamp.jpg');
+  const signatureRel = copySeedAssetToUploads('mirus-signature.jpg', 'company', 'mirus-signature.jpg');
+
   const company = await Company.create({
     slug: 'mirus', name: 'Mirus Med Sciences', status: 'active', contactEmail: 'hr@mirus.com',
-    branding: { authorizedSignatoryName: 'Priya Sharma', authorizedSignatoryDesignation: 'HR Manager' },
+    branding: {
+      authorizedSignatoryName: 'Priya Sharma',
+      authorizedSignatoryDesignation: 'HR Manager',
+      logoUrl: logoRel,
+      stampUrl: stampRel,
+      signatureUrl: signatureRel
+    },
     statutory: { gstin: '29ABCDE1234F1Z5', cin: 'U12345KA2020PTC000001' },
     address: addr(),
     // Prefer company-stored SMTP (Company Settings). Optionally hydrate from
@@ -191,6 +242,7 @@ const run = async () => {
   console.log('   Admin:      mirus / admin@mirus.com / Admin@123');
   console.log(`   HR:         mirus / priya.hr@mirus.com / ${DEMO_PASSWORD}`);
   console.log(`   Employee:   mirus / rahul.kumar@mirus.com / ${DEMO_PASSWORD}`);
+  console.log(`   Employee:   mirus / freelancer.nenu@gmail.com / ${DEMO_PASSWORD}`);
   console.log('   Superadmin: _platform / super@platform.local / ChangeMe!123');
   if (summary._offerLink) {
     console.log('--------------------------------------------------------');
@@ -221,10 +273,11 @@ async function seedCompany(company) {
 
   // --- Employees ---
   const employeesSpec = [
-    { email: 'rahul.kumar@mirus.com', first: 'Rahul', last: 'Kumar', empId: 'MMS45872', designation: 'Senior Software Engineer', department: 'Engineering', ctc: 1200000, tpl: engTpl, type: 'Permanent', manager: true },
-    { email: 'amit.patel@mirus.com', first: 'Amit', last: 'Patel', empId: 'MMS45873', designation: 'Software Engineer', department: 'Engineering', ctc: 900000, tpl: engTpl, type: 'Probation' },
-    { email: 'neha.gupta@mirus.com', first: 'Neha', last: 'Gupta', empId: 'MMS45874', designation: 'Account Executive', department: 'Sales', ctc: 800000, tpl: salesTpl, type: 'Permanent' },
-    { email: 'sunny.deol@mirus.com', first: 'Sunny', last: 'Deol', empId: 'MMS45860', designation: 'Operations Lead', department: 'Operations', ctc: 1500000, tpl: engTpl, type: 'Contract', exiting: true }
+    { email: 'rahul.kumar@mirus.com', first: 'Rahul', last: 'Kumar', empId: 'MMS45872', designation: 'Senior Software Engineer', department: 'Engineering', ctc: 1200000, tpl: engTpl, type: 'Permanent', manager: true, gender: 'Male' },
+    { email: 'amit.patel@mirus.com', first: 'Amit', last: 'Patel', empId: 'MMS45873', designation: 'Software Engineer', department: 'Engineering', ctc: 900000, tpl: engTpl, type: 'Probation', gender: 'Male' },
+    { email: 'neha.gupta@mirus.com', first: 'Neha', last: 'Gupta', empId: 'MMS45874', designation: 'Account Executive', department: 'Sales', ctc: 800000, tpl: salesTpl, type: 'Permanent', gender: 'Female' },
+    { email: 'sunny.deol@mirus.com', first: 'Sunny', last: 'Deol', empId: 'MMS45860', designation: 'Operations Lead', department: 'Operations', ctc: 1500000, tpl: engTpl, type: 'Contract', exiting: true, gender: 'Male' },
+    { email: 'freelancer.nenu@gmail.com', first: 'Ananya', last: 'Sharma', empId: 'MMS45875', designation: 'Frontend Engineer', department: 'Engineering', ctc: 1000000, tpl: engTpl, type: 'Permanent', gender: 'Female' }
   ];
 
   const employees = [];
@@ -232,7 +285,7 @@ async function seedCompany(company) {
   for (const spec of employeesSpec) {
     const user = await User.create({
       email: spec.email, password: DEMO_PASSWORD, role: 'employee', isActive: true, onboardingStage: 'completed',
-      personalDetails: { firstName: spec.first, lastName: spec.last, dateOfBirth: new Date('1993-09-20'), gender: 'Male', maritalStatus: 'Single', passportPhotoUrl: null },
+      personalDetails: { firstName: spec.first, lastName: spec.last, dateOfBirth: new Date('1993-09-20'), gender: spec.gender || 'Male', maritalStatus: 'Single', passportPhotoUrl: null },
       contactInfo: baseContact(),
       familyDetails: [{ name: `${spec.first} Sr.`, relationship: 'Father', dependent: true }],
       educationHistory: [
@@ -409,10 +462,8 @@ async function seedOffers(engTpl, company = null) {
 }
 
 /**
- * Seed C&F agreement templates:
+ * Seed C&F agreement template:
  * - Agent from seed/cf-examples/cf-agent.pdf (C&F new)
- * - Distributor from seed/cf-examples/cf-distributor.pdf
- * - Wholesaler as a generated sample PDF (no external source file yet)
  */
 async function seedCFTemplates() {
   fs.mkdirSync(CF_TEMPLATE_DIR, { recursive: true });
@@ -439,32 +490,10 @@ async function seedCFTemplates() {
 
   await installExample({
     type: 'CFAgent',
-    name: 'C&F Agent Agreement',
-    description: 'Standard C&F Agent appointment agreement (from C&F new).',
+    name: 'C&F Agency Agreement',
+    description: 'Standard C&F Agency appointment agreement (from C&F new).',
     sourceName: 'cf-agent.pdf',
-    originalFileName: 'C&F Agent Agreement.pdf'
-  });
-
-  await installExample({
-    type: 'CFDistributor',
-    name: 'C&F Distributor Agreement',
-    description: 'Standard C&F Distributor appointment agreement.',
-    sourceName: 'cf-distributor.pdf',
-    originalFileName: 'C&F Distributor Agreement.pdf'
-  });
-
-  // Wholesaler sample — generated placeholder until a branded PDF is supplied.
-  const wholesalerPdf = await buildWholesalerSamplePdf();
-  const wholesalerName = `${crypto.randomUUID()}.pdf`;
-  await fsp.writeFile(path.join(CF_TEMPLATE_DIR, wholesalerName), wholesalerPdf);
-  await CFTemplate.create({
-    type: 'CFWholesaler',
-    name: 'C&F Wholesaler Agreement',
-    description: 'Sample C&F Wholesaler agreement template. Replace with the official PDF when available.',
-    fileUrl: cfTemplateRelPath(wholesalerName),
-    originalFileName: 'C&F Wholesaler Agreement.pdf',
-    mimeType: 'application/pdf',
-    active: true
+    originalFileName: 'C&F Agency Agreement.pdf'
   });
 }
 
@@ -523,24 +552,38 @@ async function seedLetterTemplates() {
   ];
 
   for (const d of defaults) {
-    // Minimal blank PDF so View works out of the box; replace with branded letterhead anytime.
-    const doc = await PDFDocument.create();
-    const page = doc.addPage([595, 842]);
-    const font = await doc.embedFont(StandardFonts.Helvetica);
-    const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-    page.drawText('Mirus Med Sciences', { x: 48, y: 780, size: 16, font: bold });
-    page.drawText(d.title, { x: 48, y: 750, size: 12, font: bold });
-    page.drawText('Upload a fillable letterhead PDF to replace this sample.', { x: 48, y: 720, size: 10, font });
-    const bytes = await doc.save();
-    const typeDir = path.resolve(LETTER_TEMPLATE_DIR, d.type);
-    await fsp.mkdir(typeDir, { recursive: true });
-    const filename = `${d.type}-${d.name.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/-+/g, '-').slice(0, 40) || 'template'}-${crypto.randomUUID()}.pdf`;
-    await fsp.writeFile(path.join(typeDir, filename), bytes);
+    let fileUrl = null;
+    let originalFileName = `${d.name}.pdf`;
+
+    if (d.type === 'FNFLetter') {
+      const fnfRel = copySeedAssetToUploads('FNF_Settlement_Letter_Template.pdf', 'letter-templates/FNFLetter', 'FNF_Settlement_Letter_Template.pdf');
+      if (fnfRel) {
+        fileUrl = fnfRel;
+        originalFileName = 'FNF_Settlement_Letter_Template.pdf';
+      }
+    }
+
+    if (!fileUrl) {
+      // Minimal blank PDF so View works out of the box; replace with branded letterhead anytime.
+      const doc = await PDFDocument.create();
+      const page = doc.addPage([595, 842]);
+      const font = await doc.embedFont(StandardFonts.Helvetica);
+      const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+      page.drawText('Mirus Med Sciences', { x: 48, y: 780, size: 16, font: bold });
+      page.drawText(d.title, { x: 48, y: 750, size: 12, font: bold });
+      page.drawText('Upload a fillable letterhead PDF to replace this sample.', { x: 48, y: 720, size: 10, font });
+      const bytes = await doc.save();
+      const typeDir = path.resolve(LETTER_TEMPLATE_DIR, d.type);
+      await fsp.mkdir(typeDir, { recursive: true });
+      const filename = `${d.type}-${d.name.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/-+/g, '-').slice(0, 40) || 'template'}-${crypto.randomUUID()}.pdf`;
+      await fsp.writeFile(path.join(typeDir, filename), bytes);
+      fileUrl = letterTemplateRelPath(d.type, filename);
+    }
 
     await LetterTemplate.create({
       ...d,
-      fileUrl: letterTemplateRelPath(d.type, filename),
-      originalFileName: `${d.name}.pdf`,
+      fileUrl,
+      originalFileName,
       mimeType: 'application/pdf',
       isDefault: true,
       active: true
@@ -548,40 +591,6 @@ async function seedLetterTemplates() {
   }
 }
 
-async function buildWholesalerSamplePdf() {
-  const doc = await PDFDocument.create();
-  const page = doc.addPage([595, 842]);
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const ink = rgb(0.18, 0.18, 0.18);
-  let y = 780;
-  const line = (text, size = 11, useBold = false, gap = 18) => {
-    page.drawText(String(text), { x: 48, y, size, font: useBold ? bold : font, color: ink });
-    y -= gap;
-  };
-  line('Mirus Med Sciences Private Limited', 16, true, 28);
-  line('C & F WHOLESALER AGREEMENT', 13, true, 28);
-  line('This agreement is entered into on this ______ day of ______ Year 20__ at ______________.');
-  line('By and between:');
-  line('Mirus Med Sciences Private Limited (the "Company")');
-  line('AND');
-  line('Mr./Mrs./Ms ________________________________ (the "C&F Wholesaler").', 11, false, 24);
-  line('1. Appointment & Territory', 12, true);
-  line('The Company appoints the C&F Wholesaler for sale of Products in the territory of __________.');
-  line('2. Duration', 12, true);
-  line('This Agreement is effective for one year and may be renewed by mutual written agreement.');
-  line('3. Supply & Payment', 12, true);
-  line('Products supplied FOR to the Wholesaler godown. Margin ____ %. Payment: advance / as agreed.');
-  line('4. Licenses', 12, true);
-  line('The Wholesaler shall maintain valid drug wholesale licenses (Form 20B / 21B) throughout.');
-  line('5. General', 12, true, 22);
-  line('This sample template may be replaced under Setup Templates → C&F Templates.');
-  y -= 40;
-  line('For the Company                          For the C&F Wholesaler', 10, false, 40);
-  line('______________________                  ______________________', 10, false, 16);
-  line('Authorized Signatory                     Authorized Signatory', 9);
-  return Buffer.from(await doc.save());
-}
 
 run().catch(async (err) => {
   console.error('❌ Seed failed:', err);
