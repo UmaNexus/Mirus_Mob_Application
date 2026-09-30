@@ -7,6 +7,7 @@ import asyncHandler from '../utils/asyncHandler.js';
 import { logActivity } from '../services/activityService.js';
 import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds, buildReportingChainAbove, canAccessFieldOpsUser } from '../middleware/fieldForceAuth.js';
 import { buildApprovalInfo } from '../utils/approvalInfo.js';
+import { dispatchNotification } from '../services/notificationService.js';
 
 const EDITABLE_STATUSES = ['draft', 'rejected', 'withdrawn'];
 const APPROVER_SELECT = 'personalDetails.firstName personalDetails.lastName role employeeDetails.fieldForce employeeDetails.employeeId';
@@ -201,6 +202,25 @@ export const submitMtp = asyncHandler(async (req, res) => {
     message: `MTP for ${plan.month} submitted for approval`
   });
 
+  const employeeName = [req.user?.personalDetails?.firstName, req.user?.personalDetails?.lastName].filter(Boolean).join(' ') || 'Employee';
+  const visitsCount = (plan.plannedVisits || []).length;
+  if (chosen?._id) {
+    dispatchNotification({
+      companyId: req.user.companyId,
+      recipientIds: [chosen._id],
+      senderId: req.user._id,
+      module: 'mtp',
+      eventId: 'MTP_SUBMITTED',
+      title: `MTP Submitted: ${plan.month}`,
+      body: `${employeeName} submitted Monthly Tour Plan for ${plan.month} (${visitsCount} visits planned)`,
+      priority: 'high',
+      deepLink: `mirus://manager/approvals/mtp/${plan._id}`,
+      entityType: 'MonthlyTourPlan',
+      entityId: plan._id,
+      data: { screen: 'MtpReviewScreen', planId: plan._id, bdmName: employeeName, month: plan.month }
+    }).catch(() => {});
+  }
+
   res.status(200).json({ success: true, message: 'MTP submitted for approval', mtp: plan });
 });
 
@@ -216,6 +236,25 @@ export const withdrawMtp = asyncHandler(async (req, res) => {
   await plan.save();
   await plan.populate(POPULATE);
   await logActivity({ actor: req.user, action: 'mtp.withdraw', entityType: 'MonthlyTourPlan', entityId: plan._id, message: `MTP for ${plan.month} withdrawn` });
+
+  const employeeName = [req.user?.personalDetails?.firstName, req.user?.personalDetails?.lastName].filter(Boolean).join(' ') || 'Employee';
+  if (plan.approverId) {
+    dispatchNotification({
+      companyId: req.user.companyId,
+      recipientIds: [plan.approverId],
+      senderId: req.user._id,
+      module: 'mtp',
+      eventId: 'MTP_WITHDRAWN',
+      title: 'MTP Withdrawn by Submitter',
+      body: `${employeeName} withdrew their Tour Plan submission for ${plan.month}`,
+      priority: 'medium',
+      deepLink: 'mirus://manager/approvals?tab=mtp',
+      entityType: 'MonthlyTourPlan',
+      entityId: plan._id,
+      data: { screen: 'ApprovalsScreen', tab: 'mtp', planId: plan._id }
+    }).catch(() => {});
+  }
+
   res.status(200).json({ success: true, message: 'MTP withdrawn', mtp: plan });
 });
 
@@ -254,6 +293,39 @@ export const decideMtp = asyncHandler(async (req, res) => {
     actor: req.user, action: `mtp.${status}`, entityType: 'MonthlyTourPlan', entityId: plan._id,
     message: `MTP for ${plan.month} ${status}`
   });
+
+  const managerName = [req.user?.personalDetails?.firstName, req.user?.personalDetails?.lastName].filter(Boolean).join(' ') || 'Manager';
+  if (status === 'approved') {
+    dispatchNotification({
+      companyId: req.user.companyId,
+      recipientIds: [plan.userId],
+      senderId: req.user._id,
+      module: 'mtp',
+      eventId: 'MTP_APPROVED',
+      title: `Tour Plan Approved: ${plan.month}`,
+      body: `Your Tour Plan for ${plan.month} has been approved by ${managerName}.${note ? ` Note: "${note}"` : ''}`,
+      priority: 'high',
+      deepLink: `mirus://bdm/mtp/${plan._id}`,
+      entityType: 'MonthlyTourPlan',
+      entityId: plan._id,
+      data: { screen: 'TourDetailScreen', planId: plan._id, month: plan.month }
+    }).catch(() => {});
+  } else {
+    dispatchNotification({
+      companyId: req.user.companyId,
+      recipientIds: [plan.userId],
+      senderId: req.user._id,
+      module: 'mtp',
+      eventId: 'MTP_REJECTED',
+      title: 'Tour Plan Needs Revision',
+      body: `Your Tour Plan for ${plan.month} was rejected by ${managerName}.${note ? ` Reason: "${note}"` : ''}`,
+      priority: 'high',
+      deepLink: `mirus://bdm/mtp/${plan._id}`,
+      entityType: 'MonthlyTourPlan',
+      entityId: plan._id,
+      data: { screen: 'TourDetailScreen', planId: plan._id, month: plan.month, reason: note }
+    }).catch(() => {});
+  }
 
   res.status(200).json({ success: true, message: `MTP ${status}`, mtp: plan });
 });

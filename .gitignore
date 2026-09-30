@@ -12,6 +12,7 @@ build/
 .env
 .env.local
 .env.*.local
+mobile/google-services.json
 
 # Uploaded files (avatars, documents, payslips, offers)
 server/uploads/

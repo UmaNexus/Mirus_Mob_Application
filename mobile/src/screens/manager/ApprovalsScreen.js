@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, Pressable, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CalendarDays, Receipt, Palmtree, CircleCheck, CircleX, ChevronRight } from 'lucide-react-native';
@@ -20,8 +20,15 @@ import { colors, spacing, radii, typography } from '../../theme';
 
 const rupees = (paisa) => `₹${Math.round((paisa || 0) / 100).toLocaleString('en-IN')}`;
 
-export default function ApprovalsScreen({ navigation }) {
-  const [activeTab, setActiveTab] = useState('mtp'); // 'mtp' | 'expenses' | 'leaves'
+export default function ApprovalsScreen({ navigation, route }) {
+  const initialTab = route?.params?.tab || 'mtp';
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  useEffect(() => {
+    if (route?.params?.tab && ['mtp', 'expenses', 'leaves'].includes(route.params.tab)) {
+      setActiveTab(route.params.tab);
+    }
+  }, [route?.params?.tab]);
   const [rejectingId, setRejectingId] = useState(null);
   const [rejectNote, setRejectNote] = useState('');
   const [actionBusyId, setActionBusyId] = useState(null);

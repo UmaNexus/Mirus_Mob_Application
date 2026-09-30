@@ -34,6 +34,8 @@ const BLOCK_PALETTE = [
 const HOLIDAY_COLOR = colors.danger;
 const HOLIDAY_SOFT = colors.dangerSoft;
 
+import useEntityHydration from '../../hooks/useEntityHydration';
+
 /**
  * One tour submission — a fresh draft ("+ Create New Tour", no route param)
  * or an existing tour opened from the month view (`route.params.plan`). A
@@ -50,16 +52,42 @@ const HOLIDAY_SOFT = colors.dangerSoft;
  */
 export default function TourDetailScreen({ route, navigation }) {
   const initialPlan = route.params?.plan || null;
-  const month = initialPlan?.month || route.params.month;
+  const planId = route.params?.planId || route.params?.id || initialPlan?._id || null;
+
+  const { data: hydratedPlan } = useEntityHydration({
+    initialEntity: initialPlan,
+    entityId: planId,
+    fetcher: async (id) => {
+      const list = await mtpApi.listMine();
+      return (list || []).find((p) => String(p._id) === String(id)) || null;
+    }
+  });
 
   const [plan, setPlan] = useState(initialPlan);
   const [activePlanId, setActivePlanId] = useState(initialPlan?._id || null);
+
+  const month = plan?.month || initialPlan?.month || route.params?.month || monthKey(new Date());
+
+  const [blocks, setBlocks] = useState(() => (
+    initialPlan ? blocksFromVisits(initialPlan.plannedVisits || []) : []
+  ));
+  const [remarks, setRemarks] = useState(initialPlan?.remarks || '');
+
+  React.useEffect(() => {
+    if (hydratedPlan) {
+      setPlan(hydratedPlan);
+      setActivePlanId(hydratedPlan._id);
+      setBlocks(blocksFromVisits(hydratedPlan.plannedVisits || []));
+      setRemarks(hydratedPlan.remarks || '');
+    }
+  }, [hydratedPlan]);
+
   const editable = !plan || EDITABLE_STATUSES.includes(plan.status);
 
   const doctorsQuery = useAsync(() => doctorsApi.listMine(), []);
   const areas = useMemo(() => [...new Set((doctorsQuery.data || []).map((d) => d.area).filter(Boolean))].sort(), [doctorsQuery.data]);
 
-  const year = Number(month.split('-')[0]);
+  const year = Number(month.split('-')[0]) || new Date().getFullYear();
   const holidaysQuery = useAsync(() => holidaysApi.listHolidays(year), [year]);
   const holidayDates = useMemo(
     () => new Set((holidaysQuery.data || []).filter((h) => h.dateKey.startsWith(month)).map((h) => h.dateKey)),
@@ -73,11 +101,6 @@ export default function TourDetailScreen({ route, navigation }) {
     sublabel: [a.employeeDetails?.fieldForce?.tier || (a.role === 'admin' || a.role === 'superadmin' ? 'Admin' : null), a.employeeDetails?.fieldForce?.territory].filter(Boolean).join(' · ')
   })), [approversQuery.data]);
   const [approverId, setApproverId] = useState(null);
-
-  const [blocks, setBlocks] = useState(() => (
-    initialPlan ? blocksFromVisits(initialPlan.plannedVisits || []) : []
-  ));
-  const [remarks, setRemarks] = useState(initialPlan?.remarks || '');
 
   // ---- In-progress range selection ----
   const [pendingStart, setPendingStart] = useState(null);

@@ -1,5 +1,5 @@
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useEffect } from 'react';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../context/AuthContext';
 import { resolveUserTier, isExecutiveTier } from './roleHelpers';
@@ -8,7 +8,10 @@ import LoginScreen from '../screens/LoginScreen';
 import BdmTabNavigator from './bdm/BdmTabNavigator';
 import ManagerTabNavigator from './manager/ManagerTabNavigator';
 import ExecutiveTabNavigator from './executive/ExecutiveTabNavigator';
+import linking from './linking';
+import { registerForPushNotificationsAsync, setupNotificationListeners } from '../services/notificationService';
 
+export const navigationRef = createNavigationContainerRef();
 
 const Stack = createNativeStackNavigator();
 
@@ -35,8 +38,18 @@ export default function RootNavigator() {
       ? ExecutiveTabNavigator
       : ManagerTabNavigator;
 
+  useEffect(() => {
+    if (status === 'authenticated') {
+      registerForPushNotificationsAsync().catch(() => {});
+      const unsubscribe = setupNotificationListeners(navigationRef);
+      return () => {
+        if (typeof unsubscribe === 'function') unsubscribe();
+      };
+    }
+  }, [status]);
+
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef} linking={linking}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {status === 'authenticated' ? (
           <Stack.Screen name="App" component={AppNavigator} />

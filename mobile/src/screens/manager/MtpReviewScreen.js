@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import React, { useMemo, useState, useEffect } from 'react';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CircleCheck, CircleX, MapPin, UserRound } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
@@ -11,6 +11,7 @@ import Button from '../../components/Button';
 import FormField from '../../components/FormField';
 import StatusBadge from '../../components/StatusBadge';
 import ErrorBanner from '../../components/ErrorBanner';
+import useEntityHydration from '../../hooks/useEntityHydration';
 import { colors, spacing, typography, iconSizes } from '../../theme';
 
 const TONE_BY_STATUS = { draft: 'neutral', pending: 'warning', approved: 'success', rejected: 'danger', withdrawn: 'neutral' };
@@ -26,8 +27,30 @@ const TONE_BY_STATUS = { draft: 'neutral', pending: 'warning', approved: 'succes
  */
 export default function MtpReviewScreen({ route, navigation }) {
   const { user } = useAuth();
-  const [plan, setPlan] = useState(route.params.plan);
-  const bdmName = route.params.bdmName;
+  const initialPlan = route.params?.plan;
+  const planId = route.params?.planId || route.params?.id || initialPlan?._id;
+
+  const { data: hydratedPlan, loading: hydrating } = useEntityHydration({
+    initialEntity: initialPlan,
+    entityId: planId,
+    fetcher: async (id) => {
+      const list = await mtpApi.listPending();
+      const match = (list || []).find((p) => String(p._id) === String(id));
+      if (match) return match;
+      const teamList = await mtpApi.listTeam();
+      return (teamList || []).find((p) => String(p._id) === String(id)) || null;
+    }
+  });
+
+  const [plan, setPlan] = useState(initialPlan || null);
+
+  useEffect(() => {
+    if (hydratedPlan) {
+      setPlan(hydratedPlan);
+    }
+  }, [hydratedPlan]);
+
+  const bdmName = route.params?.bdmName || (plan?.userId ? displayName(plan.userId) : 'Tour Plan');
 
   const [note, setNote] = useState('');
   const [showRejectNote, setShowRejectNote] = useState(false);
@@ -35,9 +58,26 @@ export default function MtpReviewScreen({ route, navigation }) {
   const [error, setError] = useState(null);
 
   const blocks = useMemo(() => {
+    if (!plan) return [];
     const built = blocksFromVisits(plan.plannedVisits || []);
     return [...built].sort((a, b) => a.startDate.localeCompare(b.startDate));
-  }, [plan.plannedVisits]);
+  }, [plan?.plannedVisits]);
+
+  if (hydrating || (!plan && planId)) {
+    return (
+      <SafeAreaView style={[styles.container, styles.center]} edges={['top']}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </SafeAreaView>
+    );
+  }
+
+  if (!plan) {
+    return (
+      <SafeAreaView style={[styles.container, styles.center]} edges={['top']}>
+        <Text style={styles.hint}>Tour plan details not found.</Text>
+      </SafeAreaView>
+    );
+  }
 
   const approverTier = plan.approverId?.employeeDetails?.fieldForce?.tier
     || (plan.approverId?.role === 'admin' || plan.approverId?.role === 'superadmin' ? 'Admin' : null);
@@ -130,6 +170,7 @@ export default function MtpReviewScreen({ route, navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
+  center: { justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
   content: { padding: spacing.lg, gap: spacing.md },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   hint: { fontSize: 12, color: colors.muted },

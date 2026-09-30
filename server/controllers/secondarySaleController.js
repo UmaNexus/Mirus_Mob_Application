@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import SecondarySale from '../models/SecondarySale.js';
 import Stockist from '../models/Stockist.js';
+import User from '../models/User.js';
+import { dispatchNotification } from '../services/notificationService.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { rupeesToPaisa } from '../utils/money.js';
@@ -44,6 +46,29 @@ export const createSecondarySale = asyncHandler(async (req, res) => {
     quantity: quantity || 0,
     value: value != null ? rupeesToPaisa(value) : 0
   });
+
+  const submitter = await User.findById(req.user._id).select('personalDetails employeeDetails.reportingManagerId');
+  const managerId = submitter?.employeeDetails?.reportingManagerId;
+  const employeeName = [submitter?.personalDetails?.firstName, submitter?.personalDetails?.lastName].filter(Boolean).join(' ') || 'Employee';
+  const formattedVal = value != null ? (rupeesToPaisa(value) / 100).toLocaleString('en-IN') : '0';
+
+  if (managerId) {
+    dispatchNotification({
+      companyId: req.user.companyId,
+      recipientIds: [managerId],
+      senderId: req.user._id,
+      module: 'secondary_sales',
+      eventId: 'SECONDARY_SALES_SUBMITTED',
+      title: 'Secondary Sales Logged',
+      body: `${employeeName} logged secondary sale for ${productName} (₹${formattedVal})`,
+      priority: 'low',
+      deepLink: 'mirus://bdm/secondary-sales',
+      entityType: 'SecondarySale',
+      entityId: sale._id,
+      data: { screen: 'SecondarySalesScreen', saleId: sale._id }
+    }).catch(() => {});
+  }
+
   res.status(201).json({ success: true, message: 'Secondary sale recorded', sale });
 });
 

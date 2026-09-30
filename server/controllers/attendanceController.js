@@ -14,6 +14,7 @@ import {
 import { PERMISSIONS, roleHasPermission } from '../config/permissions.js';
 import { buildReportingSubtreeIds, canAccessFieldOpsUser } from '../middleware/fieldForceAuth.js';
 import { buildApprovalInfo } from '../utils/approvalInfo.js';
+import { dispatchNotification } from '../services/notificationService.js';
 
 const LEAVE_APPROVER_SELECT = 'personalDetails.firstName personalDetails.lastName role employeeDetails.fieldForce employeeDetails.employeeId';
 
@@ -486,6 +487,30 @@ export const applyLeave = asyncHandler(async (req, res) => {
   const leave = await LeaveRequest.create({
     userId: req.user._id, type, fromDate: from, toDate: to, days: computedDays, reason
   });
+
+  const submitter = await User.findById(req.user._id).select('personalDetails employeeDetails.reportingManagerId');
+  const managerId = submitter?.employeeDetails?.reportingManagerId;
+  const employeeName = [submitter?.personalDetails?.firstName, submitter?.personalDetails?.lastName].filter(Boolean).join(' ') || 'Employee';
+  const fromStr = from.toISOString().slice(0, 10);
+  const toStr = to.toISOString().slice(0, 10);
+
+  if (managerId) {
+    dispatchNotification({
+      companyId: req.user.companyId,
+      recipientIds: [managerId],
+      senderId: req.user._id,
+      module: 'leave',
+      eventId: 'LEAVE_SUBMITTED',
+      title: 'New Leave Application',
+      body: `${employeeName} applied for ${type} leave (${computedDays} days: ${fromStr} to ${toStr})`,
+      priority: 'high',
+      deepLink: 'mirus://manager/approvals?tab=leaves',
+      entityType: 'LeaveRequest',
+      entityId: leave._id,
+      data: { screen: 'ApprovalsScreen', tab: 'leaves', leaveId: leave._id }
+    }).catch(() => {});
+  }
+
   res.status(201).json({ success: true, message: 'Leave request submitted', leave });
 });
 
@@ -573,6 +598,42 @@ export const decideLeave = asyncHandler(async (req, res) => {
     }
   }
 
+  const managerName = [req.user?.personalDetails?.firstName, req.user?.personalDetails?.lastName].filter(Boolean).join(' ') || 'Manager';
+  const fromStr = new Date(leave.fromDate).toISOString().slice(0, 10);
+  const toStr = new Date(leave.toDate).toISOString().slice(0, 10);
+
+  if (status === 'Approved') {
+    dispatchNotification({
+      companyId: req.user.companyId,
+      recipientIds: [leave.userId],
+      senderId: req.user._id,
+      module: 'leave',
+      eventId: 'LEAVE_APPROVED',
+      title: 'Leave Request Approved',
+      body: `Your ${leave.type} leave for ${leave.days} days (${fromStr} to ${toStr}) was approved by ${managerName}`,
+      priority: 'high',
+      deepLink: 'mirus://bdm/leave',
+      entityType: 'LeaveRequest',
+      entityId: leave._id,
+      data: { screen: 'ApplyLeaveScreen', leaveId: leave._id }
+    }).catch(() => {});
+  } else {
+    dispatchNotification({
+      companyId: req.user.companyId,
+      recipientIds: [leave.userId],
+      senderId: req.user._id,
+      module: 'leave',
+      eventId: 'LEAVE_REJECTED',
+      title: 'Leave Request Rejected',
+      body: `Your ${leave.type} leave request was rejected by ${managerName}.${note ? ` Reason: "${note}"` : ''}`,
+      priority: 'high',
+      deepLink: 'mirus://bdm/leave',
+      entityType: 'LeaveRequest',
+      entityId: leave._id,
+      data: { screen: 'ApplyLeaveScreen', leaveId: leave._id, reason: note }
+    }).catch(() => {});
+  }
+
   res.status(200).json({ success: true, message: `Leave ${status.toLowerCase()}`, leave });
 });
 
@@ -600,6 +661,29 @@ export const cancelLeave = asyncHandler(async (req, res) => {
     }
   }
 
+  const submitter = await User.findById(req.user._id).select('personalDetails employeeDetails.reportingManagerId');
+  const managerId = submitter?.employeeDetails?.reportingManagerId;
+  const employeeName = [submitter?.personalDetails?.firstName, submitter?.personalDetails?.lastName].filter(Boolean).join(' ') || 'Employee';
+  const fromStr = new Date(leave.fromDate).toISOString().slice(0, 10);
+  const toStr = new Date(leave.toDate).toISOString().slice(0, 10);
+
+  if (managerId) {
+    dispatchNotification({
+      companyId: req.user.companyId,
+      recipientIds: [managerId],
+      senderId: req.user._id,
+      module: 'leave',
+      eventId: 'LEAVE_CANCELLED',
+      title: 'Leave Request Cancelled',
+      body: `${employeeName} cancelled their leave application for ${fromStr} to ${toStr}`,
+      priority: 'medium',
+      deepLink: 'mirus://manager/approvals?tab=leaves',
+      entityType: 'LeaveRequest',
+      entityId: leave._id,
+      data: { screen: 'ApprovalsScreen', tab: 'leaves', leaveId: leave._id }
+    }).catch(() => {});
+  }
+
   res.status(200).json({ success: true, message: 'Leave cancelled', leave });
 });
 
@@ -615,6 +699,29 @@ export const createHoliday = asyncHandler(async (req, res) => {
     { $set: { date: d, name, optional: Boolean(optional) }, $setOnInsert: { dateKey: dateKeyOf(d) } },
     { new: true, upsert: true, setDefaultsOnInsert: true, runValidators: true }
   );
+
+  // Broadcast to active company employees
+  User.find({ isActive: true }).select('_id').lean().then((users) => {
+    const recipientIds = users.map((u) => u._id).filter((id) => String(id) !== String(req.user._id));
+    if (recipientIds.length > 0) {
+      const dStr = d.toISOString().slice(0, 10);
+      dispatchNotification({
+        companyId: req.user.companyId,
+        recipientIds,
+        senderId: req.user._id,
+        module: 'holiday',
+        eventId: 'HOLIDAY_ADDED',
+        title: 'Company Holiday Announced',
+        body: `${name} declared as a company holiday on ${dStr}${optional ? ' (Optional)' : ''}`,
+        priority: 'low',
+        deepLink: 'mirus://bdm/calendar',
+        entityType: 'Holiday',
+        entityId: holiday._id,
+        data: { screen: 'CalendarScreen', holidayId: holiday._id }
+      }).catch(() => {});
+    }
+  }).catch(() => {});
+
   res.status(201).json({ success: true, message: 'Holiday saved', holiday });
 });
 

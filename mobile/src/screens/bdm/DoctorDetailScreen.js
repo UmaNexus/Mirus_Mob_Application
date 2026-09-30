@@ -1,13 +1,41 @@
 import React from 'react';
-import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Card from '../../components/Card';
 import { colors, spacing, typography } from '../../theme';
+import useEntityHydration from '../../hooks/useEntityHydration';
+import * as doctorsApi from '../../api/doctors';
 
 const fmt = (d) => (d ? new Date(d).toLocaleDateString() : '—');
 
 export default function DoctorDetailScreen({ route }) {
-  const { doctor } = route.params;
+  const initialDoctor = route.params?.doctor;
+  const doctorId = route.params?.doctorId || route.params?.id || initialDoctor?._id;
+
+  const { data: doctor, loading } = useEntityHydration({
+    initialEntity: initialDoctor,
+    entityId: doctorId,
+    fetcher: async (id) => {
+      const list = await doctorsApi.listMine();
+      return (list || []).find((d) => String(d._id) === String(id)) || null;
+    }
+  });
+
+  if (loading) {
+    return (
+      <SafeAreaView style={[styles.container, styles.center]} edges={['top']}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </SafeAreaView>
+    );
+  }
+
+  if (!doctor) {
+    return (
+      <SafeAreaView style={[styles.container, styles.center]} edges={['top']}>
+        <Text style={styles.emptyText}>Doctor details not found.</Text>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -38,6 +66,8 @@ function Row({ label, value }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
+  center: { justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
+  emptyText: { ...typography.body, color: colors.muted, textAlign: 'center' },
   content: { padding: spacing.lg, gap: spacing.md },
   detailsCard: { gap: spacing.sm },
   row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },

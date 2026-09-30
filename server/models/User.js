@@ -40,6 +40,14 @@ const DocumentReferenceSchema = new mongoose.Schema({
   verificationStatus: { type: String, enum: ['Pending', 'Verified', 'Rejected'], default: 'Pending' }
 }, { _id: false });
 
+const PushDeviceSchema = new mongoose.Schema({
+  token: { type: String, required: true },
+  platform: { type: String, enum: ['ios', 'android', 'web'], default: 'android' },
+  deviceId: { type: String, default: null },
+  isActive: { type: Boolean, default: true },
+  lastSeenAt: { type: Date, default: Date.now }
+}, { _id: false });
+
 // Epic 9 — one row per qualification (SSC/10th, HSC/12th, degree, PG, professional).
 const EducationSchema = new mongoose.Schema({
   level: { type: String, required: true, enum: ['SSC', 'HSC', 'Diploma', 'Graduate', 'PostGraduate', 'Doctorate', 'Professional', 'Other'] },
@@ -166,7 +174,8 @@ const UserSchema = new mongoose.Schema({
     }
   },
 
-  uploadedDocuments: [DocumentReferenceSchema]
+  uploadedDocuments: [DocumentReferenceSchema],
+  pushDevices: [PushDeviceSchema]
 }, { timestamps: true });
 
 // Tenant-scoped uniqueness (Epic T): email + employee id are unique per company.

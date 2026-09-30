@@ -9,6 +9,7 @@ import { logActivity } from '../services/activityService.js';
 import { rupeesToPaisa } from '../utils/money.js';
 import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds, canAccessFieldOpsUser } from '../middleware/fieldForceAuth.js';
 import { buildApprovalInfo } from '../utils/approvalInfo.js';
+import { dispatchNotification } from '../services/notificationService.js';
 
 const APPROVER_SELECT = 'personalDetails.firstName personalDetails.lastName role employeeDetails.fieldForce employeeDetails.employeeId';
 
@@ -39,6 +40,44 @@ export const createExpense = asyncHandler(async (req, res) => {
     actor: req.user, action: 'expense.create', entityType: 'Expense', entityId: expense._id,
     message: `Expense claim (${category}) submitted`
   });
+
+  if (approverId) {
+    const employeeName = [req.user?.personalDetails?.firstName, req.user?.personalDetails?.lastName].filter(Boolean).join(' ') || 'Employee';
+    const dateStr = new Date(date).toISOString().slice(0, 10);
+    const formattedAmount = (rupeesToPaisa(amount) / 100).toLocaleString('en-IN');
+
+    dispatchNotification({
+      companyId: req.user.companyId,
+      recipientIds: [approverId],
+      senderId: req.user._id,
+      module: 'expense',
+      eventId: 'EXPENSE_SUBMITTED',
+      title: `New Expense Claim: ₹${formattedAmount}`,
+      body: `${employeeName} submitted a ₹${formattedAmount} ${category} claim for ${dateStr}`,
+      priority: 'high',
+      deepLink: 'mirus://manager/approvals?tab=expenses',
+      entityType: 'Expense',
+      entityId: expense._id,
+      data: { screen: 'ApprovalsScreen', tab: 'expenses', expenseId: expense._id }
+    }).catch(() => {});
+
+    if (rupeesToPaisa(amount) > 1000000) {
+      dispatchNotification({
+        companyId: req.user.companyId,
+        recipientIds: [approverId],
+        senderId: req.user._id,
+        module: 'expense',
+        eventId: 'EXPENSE_HIGH_VALUE_ALERT',
+        title: '⚠️ High Value Expense Alert',
+        body: `${employeeName} submitted high-value claim of ₹${formattedAmount} (${category}) for ${dateStr}`,
+        priority: 'medium',
+        deepLink: 'mirus://manager/approvals?tab=expenses',
+        entityType: 'Expense',
+        entityId: expense._id,
+        data: { screen: 'ApprovalsScreen', tab: 'expenses', expenseId: expense._id }
+      }).catch(() => {});
+    }
+  }
 
   res.status(201).json({ success: true, message: 'Expense submitted', expense });
 });
@@ -150,6 +189,42 @@ export const decideExpense = asyncHandler(async (req, res) => {
     actor: req.user, action: `expense.${status}`, entityType: 'Expense', entityId: expense._id,
     message: `Expense claim ${status}`
   });
+
+  const managerName = [req.user?.personalDetails?.firstName, req.user?.personalDetails?.lastName].filter(Boolean).join(' ') || 'Manager';
+  const formattedAmount = (expense.amount / 100).toLocaleString('en-IN');
+  const dateStr = new Date(expense.date).toISOString().slice(0, 10);
+
+  if (status === 'approved') {
+    dispatchNotification({
+      companyId: req.user.companyId,
+      recipientIds: [expense.userId],
+      senderId: req.user._id,
+      module: 'expense',
+      eventId: 'EXPENSE_APPROVED',
+      title: 'Expense Claim Approved',
+      body: `Your ₹${formattedAmount} ${expense.category} claim for ${dateStr} was approved by ${managerName}`,
+      priority: 'high',
+      deepLink: 'mirus://bdm/expenses',
+      entityType: 'Expense',
+      entityId: expense._id,
+      data: { screen: 'ExpensesScreen', expenseId: expense._id }
+    }).catch(() => {});
+  } else {
+    dispatchNotification({
+      companyId: req.user.companyId,
+      recipientIds: [expense.userId],
+      senderId: req.user._id,
+      module: 'expense',
+      eventId: 'EXPENSE_REJECTED',
+      title: 'Expense Claim Rejected',
+      body: `Your ₹${formattedAmount} ${expense.category} claim was rejected by ${managerName}.${note ? ` Reason: "${note}"` : ''}`,
+      priority: 'high',
+      deepLink: 'mirus://bdm/expenses',
+      entityType: 'Expense',
+      entityId: expense._id,
+      data: { screen: 'ExpensesScreen', expenseId: expense._id, reason: note }
+    }).catch(() => {});
+  }
 
   res.status(200).json({ success: true, message: `Expense ${status}`, expense });
 });

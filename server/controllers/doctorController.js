@@ -11,6 +11,7 @@ import {
   buildReportingSubtreeIds,
   canAccessFieldOpsUser
 } from '../middleware/fieldForceAuth.js';
+import { dispatchNotification } from '../services/notificationService.js';
 
 const DOCTOR_SELECT = 'name speciality area phone dob anniversaryDate assignedTo createdBy createdAt updatedAt';
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -156,6 +157,23 @@ export const createDoctor = asyncHandler(async (req, res) => {
     message: `Doctor "${doctor.name}" created${assignedTo ? ' and assigned' : ''}`
   });
 
+  if (assignedTo) {
+    dispatchNotification({
+      companyId: req.user.companyId,
+      recipientIds: [assignedTo],
+      senderId: req.user._id,
+      module: 'doctor',
+      eventId: 'DOCTOR_ASSIGNED_NEW',
+      title: 'New Doctor Assigned',
+      body: `Dr. ${doctor.name} (${doctor.speciality || 'General'}${doctor.area ? `, ${doctor.area}` : ''}) has been assigned to your territory`,
+      priority: 'medium',
+      deepLink: `mirus://bdm/doctors/${doctor._id}`,
+      entityType: 'Doctor',
+      entityId: doctor._id,
+      data: { screen: 'DoctorDetailScreen', doctorId: doctor._id }
+    }).catch(() => {});
+  }
+
   res.status(201).json({ success: true, message: 'Doctor created', doctor });
 });
 
@@ -199,6 +217,40 @@ export const updateDoctor = asyncHandler(async (req, res) => {
       message: `Doctor "${doctor.name}" reassigned`,
       meta: { from: previousAssignee, to: newAssignee }
     });
+
+    if (newAssignee) {
+      dispatchNotification({
+        companyId: req.user.companyId,
+        recipientIds: [newAssignee],
+        senderId: req.user._id,
+        module: 'doctor',
+        eventId: 'DOCTOR_ASSIGNED_NEW',
+        title: 'Doctor Assigned to Your Territory',
+        body: `Dr. ${doctor.name} (${doctor.speciality || 'General'}${doctor.area ? `, ${doctor.area}` : ''}) was assigned to you`,
+        priority: 'medium',
+        deepLink: `mirus://bdm/doctors/${doctor._id}`,
+        entityType: 'Doctor',
+        entityId: doctor._id,
+        data: { screen: 'DoctorDetailScreen', doctorId: doctor._id }
+      }).catch(() => {});
+    }
+
+    if (previousAssignee) {
+      dispatchNotification({
+        companyId: req.user.companyId,
+        recipientIds: [previousAssignee],
+        senderId: req.user._id,
+        module: 'doctor',
+        eventId: 'DOCTOR_REASSIGNED_TRANSFER',
+        title: 'Territory Doctor Transferred',
+        body: `Dr. ${doctor.name} was transferred away from your territory roster`,
+        priority: 'medium',
+        deepLink: 'mirus://bdm/doctors',
+        entityType: 'Doctor',
+        entityId: doctor._id,
+        data: { screen: 'DoctorsScreen', doctorId: doctor._id }
+      }).catch(() => {});
+    }
   }
 
   res.status(200).json({ success: true, message: 'Doctor updated', doctor });

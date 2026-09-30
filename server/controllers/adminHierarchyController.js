@@ -7,6 +7,7 @@ import { withOptionalTransaction } from '../utils/withOptionalTransaction.js';
 import { buildReportingSubtreeIds } from '../middleware/fieldForceAuth.js';
 import { FIELD_TIERS, MANAGER_TIERS } from '../config/fieldForce.js';
 import { PERMISSIONS, ROLE_PERMISSIONS } from '../config/permissions.js';
+import { dispatchNotification } from '../services/notificationService.js';
 
 const HIERARCHY_SELECT = 'personalDetails.firstName personalDetails.lastName email role isActive '
   + 'employeeDetails.employeeId employeeDetails.department employeeDetails.designation '
@@ -190,6 +191,24 @@ export const replaceManager = asyncHandler(async (req, res) => {
       reparented: directReports.map((u) => ({ id: u._id, name: displayName(u), employeeId: u.employeeDetails?.employeeId || null, tier: u.employeeDetails?.fieldForce?.tier || null }))
     };
   });
+
+  if (result?.reparented?.length > 0) {
+    const reportIds = result.reparented.map((r) => r.id);
+    dispatchNotification({
+      companyId: req.user.companyId,
+      recipientIds: reportIds,
+      senderId: req.user._id,
+      module: 'hierarchy',
+      eventId: 'MANAGER_REPLACED_NOTIFICATION',
+      title: 'Reporting Hierarchy Update',
+      body: `${result.newManager.name} is now your reporting manager. All pending requests reassigned.`,
+      priority: 'high',
+      deepLink: 'mirus://bdm/home',
+      entityType: 'User',
+      entityId: result.newManager.id,
+      data: { screen: 'BdmHomeScreen', newManagerId: result.newManager.id }
+    }).catch(() => {});
+  }
 
   res.status(200).json({ success: true, message: 'Manager replaced', data: result });
 });

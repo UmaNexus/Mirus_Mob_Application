@@ -13,6 +13,7 @@ import LoadingView from '../../components/LoadingView';
 import ErrorBanner from '../../components/ErrorBanner';
 import PunchCard from '../../components/PunchCard';
 import BrandLogo from '../../components/BrandLogo';
+import NotificationBell from '../../components/NotificationBell';
 import { colors, spacing, typography } from '../../theme';
 
 const TIER_LABEL = { NSM: 'NSMs', ZSM: 'ZSMs', RSM: 'RSMs', ASM: 'ASMs', BDM: 'BDMs' };
@@ -50,6 +51,10 @@ export default function ExecutiveHomeScreen({ navigation }) {
               {isAdmin ? 'Admin · Company-wide' : `${tier} · ${user?.employeeDetails?.fieldForce?.territory || 'MIRUS'}`}
             </Text>
           </View>
+          <NotificationBell
+            color={colors.white}
+            onPress={() => navigation.navigate('Notifications')}
+          />
         </Card>
 
         {/* NSM punches their own attendance like everyone else; Admin/superadmin

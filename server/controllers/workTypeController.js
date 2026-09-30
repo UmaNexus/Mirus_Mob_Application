@@ -1,5 +1,7 @@
 import WorkType from '../models/WorkType.js';
 import LeaveRequest from '../models/LeaveRequest.js';
+import User from '../models/User.js';
+import { dispatchNotification } from '../services/notificationService.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { logActivity } from '../services/activityService.js';
@@ -74,6 +76,25 @@ export const upsertWorkType = asyncHandler(async (req, res) => {
     });
     if (!leave) {
       leave = await LeaveRequest.create({ userId: req.user._id, type: leaveType, fromDate: from, toDate: to, days, reason });
+      const submitter = await User.findById(req.user._id).select('personalDetails employeeDetails.reportingManagerId');
+      const managerId = submitter?.employeeDetails?.reportingManagerId;
+      const employeeName = [submitter?.personalDetails?.firstName, submitter?.personalDetails?.lastName].filter(Boolean).join(' ') || 'Employee';
+      if (managerId) {
+        dispatchNotification({
+          companyId: req.user.companyId,
+          recipientIds: [managerId],
+          senderId: req.user._id,
+          module: 'leave',
+          eventId: 'LEAVE_AUTO_CREATED_SICK',
+          title: 'Sick Leave Logged via Work Type',
+          body: `${employeeName} logged ${type} work-type for ${dateKey}. Auto-created leave awaiting review.`,
+          priority: 'medium',
+          deepLink: 'mirus://manager/approvals?tab=leaves',
+          entityType: 'LeaveRequest',
+          entityId: leave._id,
+          data: { screen: 'ApprovalsScreen', tab: 'leaves', leaveId: leave._id }
+        }).catch(() => {});
+      }
     }
     linkedLeaveRequestId = leave._id;
   }

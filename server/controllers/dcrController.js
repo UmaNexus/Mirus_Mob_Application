@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import DailyCallReport from '../models/DailyCallReport.js';
 import Doctor from '../models/Doctor.js';
+import User from '../models/User.js';
+import { dispatchNotification } from '../services/notificationService.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { logActivity } from '../services/activityService.js';
@@ -97,6 +99,25 @@ export const createDcr = asyncHandler(async (req, res) => {
     actor: req.user, action: `dcr.${type}`, entityType: 'DailyCallReport', entityId: dcr._id,
     message: doctor ? `${type === 'missed' ? 'Missed visit logged' : `Logged a ${type} call`} for "${doctor.name}"` : `Logged a ${type} activity${activityName ? `: "${activityName}"` : ''}`
   });
+
+  if (type === 'joint' && accompaniedBy) {
+    const employeeName = [req.user?.personalDetails?.firstName, req.user?.personalDetails?.lastName].filter(Boolean).join(' ') || 'Employee';
+    const docName = doctor?.name ? `Dr. ${doctor.name}` : 'Doctor';
+    dispatchNotification({
+      companyId: req.user.companyId,
+      recipientIds: [accompaniedBy],
+      senderId: req.user._id,
+      module: 'dcr',
+      eventId: 'DCR_JOINT_CALL_NOTIFICATION',
+      title: 'Joint Call Logged With You',
+      body: `${employeeName} tagged you in a joint call with ${docName}${doctor?.area ? ` in ${doctor.area}` : ''}`,
+      priority: 'medium',
+      deepLink: 'mirus://bdm/dcr',
+      entityType: 'DailyCallReport',
+      entityId: dcr._id,
+      data: { screen: 'DcrReviewDetailScreen', reportId: dcr._id, dateKey }
+    }).catch(() => {});
+  }
 
   res.status(201).json({ success: true, message: 'Activity logged', dcr });
 });
@@ -269,5 +290,28 @@ export const submitDay = asyncHandler(async (req, res) => {
     { userId: req.user._id, dateKey, submittedAt: null },
     { $set: { submittedAt: new Date() } }
   );
+
+  const submitter = await User.findById(req.user._id).select('personalDetails employeeDetails.reportingManagerId');
+  const managerId = submitter?.employeeDetails?.reportingManagerId;
+  const employeeName = [submitter?.personalDetails?.firstName, submitter?.personalDetails?.lastName].filter(Boolean).join(' ') || 'Employee';
+  const totalCalls = await DailyCallReport.countDocuments({ userId: req.user._id, dateKey });
+
+  if (managerId) {
+    dispatchNotification({
+      companyId: req.user.companyId,
+      recipientIds: [managerId],
+      senderId: req.user._id,
+      module: 'dcr',
+      eventId: 'DCR_SUBMITTED',
+      title: `DCR Submitted: ${employeeName}`,
+      body: `${employeeName} submitted Daily Call Report for ${dateKey} (${totalCalls} calls completed)`,
+      priority: 'medium',
+      deepLink: `mirus://manager/dcr-review/${req.user._id}/${dateKey}`,
+      entityType: 'DailyCallReport',
+      entityId: null,
+      data: { screen: 'DcrReviewDetailScreen', userId: req.user._id, dateKey, totalCalls }
+    }).catch(() => {});
+  }
+
   res.status(200).json({ success: true, message: 'DCR submitted', modifiedCount: result.modifiedCount });
 });

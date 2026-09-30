@@ -28,6 +28,7 @@ import LoadingView from '../components/LoadingView';
 import ErrorBanner from '../components/ErrorBanner';
 import PunchCard from '../components/PunchCard';
 import BrandLogo from '../components/BrandLogo';
+import NotificationBell from '../components/NotificationBell';
 import { colors, spacing, typography } from '../theme';
 
 /**
@@ -97,6 +98,10 @@ export default function HomeScreen({ navigation }) {
                 : 'MIRUS'}
             </Text>
           </View>
+          <NotificationBell
+            color={colors.white}
+            onPress={() => navigation.navigate('Notifications')}
+          />
         </Card>
 
         {/* Every non-admin role reaches this screen (ASM/RSM/ZSM, or the

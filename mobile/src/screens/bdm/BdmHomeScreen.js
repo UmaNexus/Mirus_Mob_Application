@@ -16,6 +16,7 @@ import ErrorBanner from '../../components/ErrorBanner';
 import LoadingView from '../../components/LoadingView';
 import PunchCard from '../../components/PunchCard';
 import BrandLogo from '../../components/BrandLogo';
+import NotificationBell from '../../components/NotificationBell';
 import { colors, spacing, radii, typography } from '../../theme';
 
 function isBirthdayToday(alert) {
@@ -33,8 +34,17 @@ function isBirthdayToday(alert) {
  * hardcoded demo stats (today's calls, pending DCR, expense total, MTP
  * status, alert count all come from GET /api/field-force/dashboard).
  */
-export default function BdmHomeScreen({ navigation }) {
+export default function BdmHomeScreen({ navigation, route }) {
   const { user } = useAuth();
+  const scrollRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (route?.params?.focus === 'todaysPlan') {
+      setTimeout(() => {
+        scrollRef.current?.scrollTo({ y: 380, animated: true });
+      }, 350);
+    }
+  }, [route?.params?.focus]);
 
   const today = useAsync(attendanceApi.getToday, []);
   const dashboard = useAsync(fieldForceApi.getDashboard, []);
@@ -70,7 +80,8 @@ export default function BdmHomeScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
-      contentContainerStyle={styles.content}
+        ref={scrollRef}
+        contentContainerStyle={styles.content}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -88,6 +99,10 @@ export default function BdmHomeScreen({ navigation }) {
             <Text style={styles.heroName}>{displayName(user)}</Text>
             <Text style={styles.heroSub}>BDM · {user?.employeeDetails?.fieldForce?.territory || 'MIRUS'}</Text>
           </View>
+          <NotificationBell
+            color={colors.white}
+            onPress={() => navigation.navigate('MoreTab', { screen: 'Alerts' })}
+          />
         </Card>
 
         <PunchCard />
