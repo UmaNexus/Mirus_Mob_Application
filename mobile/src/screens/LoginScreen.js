@@ -15,24 +15,31 @@ import { colors, spacing, radii, typography } from '../theme';
  */
 export default function LoginScreen({ navigation }) {
   const { signIn } = useAuth();
-  const [companySlug, setCompanySlug] = useState('');
+  const [companySlug, setCompanySlug] = useState('mirus');
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
-  const canSubmit = companySlug.trim() && identifier.trim() && password && !submitting;
+  const canSubmit = (companySlug.trim() || 'mirus') && identifier.trim() && password && !submitting;
 
   const handleSubmit = async () => {
     setError(null);
     setSubmitting(true);
     try {
-      await signIn({ companySlug: companySlug.trim(), identifier: identifier.trim(), password });
+      await signIn({ companySlug: (companySlug.trim() || 'mirus'), identifier: identifier.trim(), password });
     } catch (err) {
       setError(err.uiMessage || err.message || 'Login failed');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const fillCredentials = (userEmail) => {
+    setCompanySlug('mirus');
+    setIdentifier(userEmail);
+    setPassword('Reviewer@2026!');
+    setError(null);
   };
 
   return (
@@ -76,6 +83,28 @@ export default function LoginScreen({ navigation }) {
           <ErrorBanner message={error} />
 
           <Button title="Log In" onPress={handleSubmit} loading={submitting} disabled={!canSubmit} style={styles.submit} />
+
+          <View style={styles.demoBar}>
+            <Text style={styles.demoBarLabel}>Reviewer / Demo Quick Access</Text>
+            <View style={styles.demoButtons}>
+              <Pressable
+                onPress={() => fillCredentials('reviewer.bdm@mirus.com')}
+                style={({ pressed }) => [styles.demoPill, pressed && { opacity: 0.7 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Fill BDM Field Force Test Credentials"
+              >
+                <Text style={styles.demoPillText}>Field Rep (BDM)</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => fillCredentials('reviewer.asm@mirus.com')}
+                style={({ pressed }) => [styles.demoPill, pressed && { opacity: 0.7 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Fill ASM Manager Test Credentials"
+              >
+                <Text style={styles.demoPillText}>Manager (ASM)</Text>
+              </Pressable>
+            </View>
+          </View>
 
           <View style={styles.legalContainer}>
             <Text style={styles.legalText}>
@@ -166,5 +195,39 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: colors.ink
+  },
+  demoBar: {
+    marginTop: spacing.lg,
+    padding: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    gap: spacing.xs
+  },
+  demoBarLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.muted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4
+  },
+  demoButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm
+  },
+  demoPill: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: colors.card,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: colors.line
+  },
+  demoPillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primaryDark
   }
 });
