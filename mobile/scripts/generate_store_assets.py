@@ -77,14 +77,14 @@ def generate_app_icon():
     mark_path = os.path.join(REPO_ROOT, 'mobile', 'assets', 'logo-mirus-mark.png')
     mark = Image.open(mark_path).convert('RGBA')
     
-    # Google Play squircle safe zone: content should occupy ~70% of canvas
-    target_w = int(size * 0.72)
+    # Google Play squircle safe zone: content should occupy ~68% of canvas
+    target_w = int(size * 0.68)
     aspect = mark.size[1] / mark.size[0]
     target_h = int(target_w * aspect)
     mark_resized = mark.resize((target_w, target_h), Image.Resampling.LANCZOS)
     
     x = (size - target_w) // 2
-    y = (size - target_h) // 2 - 18
+    y = (size - target_h) // 2 - 28
     
     # Add subtle soft shadow behind logo mark
     shadow_layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
@@ -99,18 +99,20 @@ def generate_app_icon():
     
     # Bottom brand label pill "FIELD FORCE"
     draw = ImageDraw.Draw(icon)
-    font_sub = get_font(26, bold=True)
+    font_sub = get_font(22, bold=True)
     text = "FIELD FORCE"
     bbox = draw.textbbox((0, 0), text, font=font_sub)
-    tw = bbox[2] - bbox[0]
-    tx = (size - tw) // 2
-    ty = size - 76
+    text_w = bbox[2] - bbox[0]
     
-    pill_padding_x = 22
-    pill_padding_y = 6
-    pill_rect = [tx - pill_padding_x, ty - pill_padding_y, tx + tw + pill_padding_x, ty + (bbox[3] - bbox[1]) + pill_padding_y]
-    draw.rounded_rectangle(pill_rect, radius=12, fill=BRAND_ORANGE_SOFT, outline=BRAND_ORANGE, width=2)
-    draw.text((tx, ty - 2), text, font=font_sub, fill=BRAND_ORANGE_DARK)
+    pill_w = text_w + 48
+    pill_h = 42
+    cx = size // 2
+    cy = size - 64
+    
+    pill_rect = [cx - pill_w // 2, cy - pill_h // 2, cx + pill_w // 2, cy + pill_h // 2]
+    draw.rounded_rectangle(pill_rect, radius=14, fill=BRAND_ORANGE_SOFT, outline=BRAND_ORANGE, width=2)
+    # Using anchor="mm" centers the text glyphs mathematically in the pill
+    draw.text((cx, cy), text, font=font_sub, fill=BRAND_ORANGE_DARK, anchor="mm")
     
     save_both(icon, "app_icon_512x512.png")
 
