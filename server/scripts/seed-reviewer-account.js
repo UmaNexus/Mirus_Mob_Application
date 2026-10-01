@@ -48,8 +48,8 @@ import SecondarySale from '../models/SecondarySale.js';
 import Attendance from '../models/Attendance.js';
 import LeaveRequest from '../models/LeaveRequest.js';
 
-const COMPANY_SLUG = process.env.SEED_COMPANY_SLUG || 'mirus';
-const COMPANY_NAME = process.env.SEED_COMPANY_NAME || 'Mirus Med Sciences';
+const COMPANY_SLUG = process.env.REVIEWER_COMPANY_SLUG || 'dev';
+const COMPANY_NAME = process.env.REVIEWER_COMPANY_NAME || 'Dev Field Force Co';
 export const REVIEWER_PASSWORD = 'Reviewer@2026!';
 
 const dateKey = (d) => new Date(d).toISOString().slice(0, 10);
@@ -142,26 +142,26 @@ export async function seedReviewerData() {
 
   // 1. Manager (ASM)
   const asm = await upsertUser(company, {
-    email: 'reviewer.asm@mirus.com',
+    email: 'reviewer.asm@dev.test',
     role: 'employee',
     firstName: 'Sam',
     lastName: 'Manager',
     gender: 'Female',
     tier: 'ASM',
     territory: 'Hyderabad Region',
-    employeeId: 'MMS-REV-002'
+    employeeId: 'DEV-REV-002'
   });
 
   // 2. Field Representative (BDM) - Primary Reviewer Persona
   const bdm = await upsertUser(company, {
-    email: 'reviewer.bdm@mirus.com',
+    email: 'reviewer.bdm@dev.test',
     role: 'employee',
     firstName: 'Alex',
     lastName: 'Reviewer',
     gender: 'Male',
     tier: 'BDM',
     territory: 'Banjara Hills - Hyderabad',
-    employeeId: 'MMS-REV-001',
+    employeeId: 'DEV-REV-001',
     reportingManagerId: asm._id
   });
 
@@ -330,7 +330,7 @@ async function run() {
   console.log('\n======================================================');
   console.log('  GOOGLE PLAY REVIEWER CREDENTIALS READY');
   console.log('======================================================');
-  console.log('  Company Code (Slug): mirus');
+  console.log(`  Company Code (Slug): ${COMPANY_SLUG}`);
   console.log('------------------------------------------------------');
   console.log('  PRIMARY TEST USER (BDM - Field Force):');
   console.log(`    Username/Email:   ${bdm.email}`);

@@ -36,7 +36,7 @@ If they encounter:
 | Field Name | Value to Enter |
 | :--- | :--- |
 | **Credential / Instruction Name** | `Field Force Representative (BDM) - Primary Review Access` |
-| **Username or email** | `reviewer.bdm@mirus.com` |
+| **Username or email** | `reviewer.bdm@dev.test` |
 | **Password** | `Reviewer@2026!` |
 | **Phone number** (if asked) | *Leave blank / Not applicable* |
 
@@ -45,8 +45,8 @@ If they encounter:
 MIRUS Field Force is a multi-tenant pharmaceutical field workforce management app.
 The login screen has 3 fields:
 
-1. Company code: enter "mirus" (pre-filled by default)
-2. Employee ID / Email: enter "reviewer.bdm@mirus.com"
+1. Company code: enter "dev" (pre-filled by default)
+2. Employee ID / Email: enter "reviewer.bdm@dev.test"
 3. Password: enter "Reviewer@2026!"
 
 Alternatively, on the login screen, you may tap the quick-access pill:
@@ -69,14 +69,14 @@ Once logged in, the reviewer can test all primary field force capabilities:
 | Field Name | Value to Enter |
 | :--- | :--- |
 | **Credential / Instruction Name** | `Field Force Area Manager (ASM) - Approval Review Access` |
-| **Username or email** | `reviewer.asm@mirus.com` |
+| **Username or email** | `reviewer.asm@dev.test` |
 | **Password** | `Reviewer@2026!` |
 
 #### Explanation / Instructions Box:
 ```text
 Enter:
-1. Company code: "mirus"
-2. Employee ID / Email: "reviewer.asm@mirus.com"
+1. Company code: "dev" (pre-filled by default)
+2. Employee ID / Email: "reviewer.asm@dev.test"
 3. Password: "Reviewer@2026!"
 Or tap "Manager (ASM)" in the quick-access bar.
 
@@ -89,10 +89,10 @@ This account demonstrates managerial hierarchy features: team attendance monitor
 
 We have added features to `LoginScreen.js` specifically designed to guarantee smooth review:
 
-1. **Pre-filled Company Code:** The `Company code` field defaults to `mirus` automatically. If a reviewer leaves it untouched, it still logs in to `mirus`.
+1. **Pre-filled Company Code:** The `Company code` field defaults to `dev` automatically. If a reviewer leaves it untouched, it logs into the `dev` test organization seamlessly, leaving the `mirus` slug reserved for the client's production data.
 2. **Reviewer Quick-Access Bar:** Directly below the "Log In" button, there are two one-tap fill buttons:
-   - `[Field Rep (BDM)]` &rarr; fills `mirus` + `reviewer.bdm@mirus.com` + `Reviewer@2026!`
-   - `[Manager (ASM)]` &rarr; fills `mirus` + `reviewer.asm@mirus.com` + `Reviewer@2026!`
+   - `[Field Rep (BDM)]` &rarr; fills `dev` + `reviewer.bdm@dev.test` + `Reviewer@2026!`
+   - `[Manager (ASM)]` &rarr; fills `dev` + `reviewer.asm@dev.test` + `Reviewer@2026!`
 3. **No 2FA / Friction:** Reviewer accounts bypass any OTP requirements and go straight to the authenticated dashboard.
 
 ---
@@ -106,4 +106,4 @@ cd server
 npm run db:seed:reviewer
 ```
 
-This script (`server/scripts/seed-reviewer-account.js`) is completely idempotent and will ensure the company `mirus`, the accounts `reviewer.bdm@mirus.com` and `reviewer.asm@mirus.com`, and all sample doctors, call reports, tour plans, and attendance history exist with 100% data integrity.
+This script (`server/scripts/seed-reviewer-account.js`) is completely idempotent and will ensure the company `dev`, the accounts `reviewer.bdm@dev.test` and `reviewer.asm@dev.test`, and all sample doctors, call reports, tour plans, and attendance history exist with 100% data integrity.

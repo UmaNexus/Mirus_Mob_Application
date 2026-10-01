@@ -15,19 +15,19 @@ import { colors, spacing, radii, typography } from '../theme';
  */
 export default function LoginScreen({ navigation }) {
   const { signIn } = useAuth();
-  const [companySlug, setCompanySlug] = useState('mirus');
+  const [companySlug, setCompanySlug] = useState('dev');
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
-  const canSubmit = (companySlug.trim() || 'mirus') && identifier.trim() && password && !submitting;
+  const canSubmit = (companySlug.trim() || 'dev') && identifier.trim() && password && !submitting;
 
   const handleSubmit = async () => {
     setError(null);
     setSubmitting(true);
     try {
-      await signIn({ companySlug: (companySlug.trim() || 'mirus'), identifier: identifier.trim(), password });
+      await signIn({ companySlug: (companySlug.trim() || 'dev'), identifier: identifier.trim(), password });
     } catch (err) {
       setError(err.uiMessage || err.message || 'Login failed');
     } finally {
@@ -36,7 +36,7 @@ export default function LoginScreen({ navigation }) {
   };
 
   const fillCredentials = (userEmail) => {
-    setCompanySlug('mirus');
+    setCompanySlug('dev');
     setIdentifier(userEmail);
     setPassword('Reviewer@2026!');
     setError(null);
@@ -55,7 +55,7 @@ export default function LoginScreen({ navigation }) {
             onChangeText={setCompanySlug}
             autoCapitalize="none"
             autoCorrect={false}
-            placeholder="e.g. mirus"
+            placeholder="e.g. dev"
             placeholderTextColor={colors.muted}
           />
 
@@ -88,7 +88,7 @@ export default function LoginScreen({ navigation }) {
             <Text style={styles.demoBarLabel}>Reviewer / Demo Quick Access</Text>
             <View style={styles.demoButtons}>
               <Pressable
-                onPress={() => fillCredentials('reviewer.bdm@mirus.com')}
+                onPress={() => fillCredentials('reviewer.bdm@dev.test')}
                 style={({ pressed }) => [styles.demoPill, pressed && { opacity: 0.7 }]}
                 accessibilityRole="button"
                 accessibilityLabel="Fill BDM Field Force Test Credentials"
@@ -96,7 +96,7 @@ export default function LoginScreen({ navigation }) {
                 <Text style={styles.demoPillText}>Field Rep (BDM)</Text>
               </Pressable>
               <Pressable
-                onPress={() => fillCredentials('reviewer.asm@mirus.com')}
+                onPress={() => fillCredentials('reviewer.asm@dev.test')}
                 style={({ pressed }) => [styles.demoPill, pressed && { opacity: 0.7 }]}
                 accessibilityRole="button"
                 accessibilityLabel="Fill ASM Manager Test Credentials"

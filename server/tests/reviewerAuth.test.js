@@ -14,10 +14,10 @@ beforeEach(async () => { await db.clear(); });
 test('reviewer accounts seed successfully with complete BDM and ASM field force hierarchy', async () => {
   const { bdm, asm, company } = await seedReviewerData();
 
-  assert.equal(company.slug, 'mirus');
-  assert.equal(bdm.email, 'reviewer.bdm@mirus.com');
+  assert.equal(company.slug, 'dev');
+  assert.equal(bdm.email, 'reviewer.bdm@dev.test');
   assert.equal(bdm.employeeDetails.fieldForce.tier, 'BDM');
-  assert.equal(asm.email, 'reviewer.asm@mirus.com');
+  assert.equal(asm.email, 'reviewer.asm@dev.test');
   assert.equal(asm.employeeDetails.fieldForce.tier, 'ASM');
 
   // Verify pre-seeded data for the BDM
@@ -29,39 +29,39 @@ test('reviewer accounts seed successfully with complete BDM and ASM field force 
   assert.equal(mtp.status, 'approved');
 });
 
-test('reviewer BDM can authenticate via POST /api/auth/login with companySlug: mirus', async () => {
+test('reviewer BDM can authenticate via POST /api/auth/login with companySlug: dev', async () => {
   await seedReviewerData();
 
   const res = await request(app)
     .post('/api/auth/login')
     .set('X-Client', 'mobile')
     .send({
-      companySlug: 'mirus',
-      identifier: 'reviewer.bdm@mirus.com',
+      companySlug: 'dev',
+      identifier: 'reviewer.bdm@dev.test',
       password: REVIEWER_PASSWORD
     });
 
   assert.equal(res.status, 200);
   assert.ok(res.body.token, 'Mobile client must receive Bearer token');
-  assert.equal(res.body.user.email, 'reviewer.bdm@mirus.com');
+  assert.equal(res.body.user.email, 'reviewer.bdm@dev.test');
   assert.equal(res.body.user.employeeDetails.fieldForce.tier, 'BDM');
 });
 
-test('reviewer ASM can authenticate via POST /api/auth/login with companySlug: mirus', async () => {
+test('reviewer ASM can authenticate via POST /api/auth/login with companySlug: dev', async () => {
   await seedReviewerData();
 
   const res = await request(app)
     .post('/api/auth/login')
     .set('X-Client', 'mobile')
     .send({
-      companySlug: 'mirus',
-      identifier: 'reviewer.asm@mirus.com',
+      companySlug: 'dev',
+      identifier: 'reviewer.asm@dev.test',
       password: REVIEWER_PASSWORD
     });
 
   assert.equal(res.status, 200);
   assert.ok(res.body.token);
-  assert.equal(res.body.user.email, 'reviewer.asm@mirus.com');
+  assert.equal(res.body.user.email, 'reviewer.asm@dev.test');
   assert.equal(res.body.user.employeeDetails.fieldForce.tier, 'ASM');
 });
 
@@ -72,8 +72,8 @@ test('reviewer BDM can punch in/out without any errors or OTP prompts', async ()
     .post('/api/auth/login')
     .set('X-Client', 'mobile')
     .send({
-      companySlug: 'mirus',
-      identifier: 'reviewer.bdm@mirus.com',
+      companySlug: 'dev',
+      identifier: 'reviewer.bdm@dev.test',
       password: REVIEWER_PASSWORD
     });
 
