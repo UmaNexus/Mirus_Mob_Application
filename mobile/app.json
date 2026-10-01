@@ -31,7 +31,10 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "apiBaseUrl": "http://localhost:5000/api",
+      "apiBaseUrl": "https://hrms-mirus.com/api",
+      "webAppUrl": "https://hrms-mirus.com",
+      "privacyPolicyUrl": "https://hrms-mirus.com/privacy-policy",
+      "accountDeletionUrl": "https://hrms-mirus.com/account-deletion",
       "eas": {
         "projectId": "5a4df981-eace-46be-9f64-787db1bacd7a"
       }

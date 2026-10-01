@@ -6,6 +6,7 @@ const linking = {
   prefixes: ['mirus://', 'https://mirus.app'],
   config: {
     screens: {
+      PrivacyPolicy: 'privacy-policy',
       HomeTab: {
         screens: {
           BdmHome: 'bdm/home',

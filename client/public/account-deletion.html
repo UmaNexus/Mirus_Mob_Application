@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="index, follow">
+  <title>Account & Data Deletion Request | MIRUS Field Force</title>
+  <style>
+    :root {
+      --primary: #E89000;
+      --primary-dark: #B36D00;
+      --primary-soft: #FFF3E0;
+      --ink: #1F2937;
+      --muted: #4B5563;
+      --light-muted: #6B7280;
+      --surface: #F9FAFB;
+      --card: #FFFFFF;
+      --line: #E5E7EB;
+      --success: #16A34A;
+      --success-soft: #DCFCE7;
+      --danger: #DC2626;
+      --danger-soft: #FEE2E2;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.65;
+      color: var(--ink);
+      background-color: var(--surface);
+      padding: 0;
+      margin: 0;
+    }
+    header {
+      background-color: #111827;
+      color: #FFFFFF;
+      padding: 2.5rem 1.5rem;
+      border-bottom: 4px solid var(--primary);
+    }
+    .header-container {
+      max-width: 860px;
+      margin: 0 auto;
+    }
+    .badge {
+      display: inline-block;
+      background: var(--primary);
+      color: #FFFFFF;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      margin-bottom: 0.75rem;
+    }
+    h1 {
+      font-size: 2.25rem;
+      font-weight: 800;
+      line-height: 1.2;
+      margin-bottom: 0.5rem;
+    }
+    .meta {
+      color: #9CA3AF;
+      font-size: 0.9rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+      margin-top: 0.75rem;
+    }
+    main {
+      max-width: 860px;
+      margin: 2rem auto;
+      padding: 0 1.5rem 4rem 1.5rem;
+    }
+    .card {
+      background: var(--card);
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      padding: 2rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+      margin-bottom: 2rem;
+    }
+    h2 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #111827;
+      margin-top: 1.75rem;
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.35rem;
+      border-bottom: 2px solid var(--primary-soft);
+    }
+    h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #374151;
+      margin-top: 1.25rem;
+      margin-bottom: 0.5rem;
+    }
+    p {
+      margin-bottom: 1rem;
+      color: var(--muted);
+      font-size: 1rem;
+    }
+    ul, ol {
+      margin-left: 1.5rem;
+      margin-bottom: 1.25rem;
+      color: var(--muted);
+    }
+    li {
+      margin-bottom: 0.5rem;
+    }
+    strong {
+      color: var(--ink);
+    }
+    a {
+      color: var(--primary-dark);
+      text-decoration: underline;
+    }
+    a:hover {
+      color: var(--primary);
+    }
+    .highlight-box {
+      background-color: var(--primary-soft);
+      border-left: 4px solid var(--primary);
+      padding: 1rem 1.25rem;
+      border-radius: 0 8px 8px 0;
+      margin: 1.25rem 0;
+    }
+    .highlight-box p {
+      margin: 0;
+      color: #92400E;
+      font-weight: 500;
+    }
+    .table-container {
+      overflow-x: auto;
+      margin: 1.5rem 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.95rem;
+    }
+    th, td {
+      padding: 0.75rem 1rem;
+      border: 1px solid var(--line);
+    }
+    th {
+      background-color: #F3F4F6;
+      font-weight: 700;
+      color: #111827;
+    }
+    tr:nth-child(even) td {
+      background-color: #F9FAFB;
+    }
+    .btn {
+      display: inline-block;
+      background-color: var(--primary);
+      color: #FFFFFF;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.95rem;
+      padding: 0.65rem 1.25rem;
+      border-radius: 6px;
+      transition: background-color 0.15s;
+    }
+    .btn:hover {
+      background-color: var(--primary-dark);
+      color: #FFFFFF;
+    }
+    .btn-outline {
+      background-color: transparent;
+      border: 1px solid var(--line);
+      color: var(--ink);
+    }
+    .btn-outline:hover {
+      background-color: #F3F4F6;
+      color: var(--ink);
+    }
+    footer {
+      text-align: center;
+      padding: 2rem 1.5rem;
+      color: var(--light-muted);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--line);
+      background: #FFFFFF;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-container">
+      <span class="badge">Google Play Developer Compliance</span>
+      <h1>Account & Data Deletion Request</h1>
+      <p style="color: #D1D5DB; font-size: 1.1rem; margin-top: 0.25rem;">User Data Deletion Policy for MIRUS Field Force</p>
+      <div class="meta">
+        <span><strong>Application:</strong> MIRUS Field Force (com.umanexus.fieldforce)</span>
+        <span><strong>Developer:</strong> UmaNexus</span>
+        <span><strong>Entity:</strong> Mirus Med Sciences Pvt. Ltd.</span>
+        <span><strong>Last Updated:</strong> October 1, 2026</span>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="card">
+      <div class="highlight-box">
+        <p><strong>Google Play User Data Compliance:</strong> This page fulfills Google Play's Account Deletion mandate. Users of MIRUS Field Force can request permanent deletion of their account credentials and associated personal data.</p>
+      </div>
+
+      <h2>Account & Data Deletion Instructions</h2>
+      <p>At <strong>UmaNexus</strong> and <strong>Mirus Med Sciences Pvt. Ltd.</strong>, we respect your right to control your personal data. If you wish to delete your account in <strong>MIRUS Field Force</strong> and erase associated personal information, please review the steps and policy outlined below.</p>
+
+      <h3>How to Request Account & Data Deletion</h3>
+      <p>You can request account deletion through either of the following methods:</p>
+
+      <div style="margin: 1.5rem 0; padding: 1.5rem; background: #F3F4F6; border-radius: 8px;">
+        <h3 style="margin-top: 0; color: #111827;">Option 1: In-App Request</h3>
+        <p>1. Open <strong>MIRUS Field Force</strong> on your mobile device.<br>
+           2. Navigate to the <strong>More</strong> tab (bottom navigation).<br>
+           3. Tap <strong>Privacy & Data Safety</strong> &gt; <strong>Request Account Deletion</strong>.<br>
+           4. Confirm your submission.</p>
+      </div>
+
+      <div style="margin: 1.5rem 0; padding: 1.5rem; background: #F3F4F6; border-radius: 8px;">
+        <h3 style="margin-top: 0; color: #111827;">Option 2: Direct Web / Email Submission</h3>
+        <p>Send an email to our Data Protection Team at <a href="mailto:privacy@umanexus.com?subject=Account%20and%20Data%20Deletion%20Request%20-%20MIRUS%20Field%20Force">privacy@umanexus.com</a> with:</p>
+        <ul>
+          <li>Subject: <code>Account and Data Deletion Request - MIRUS Field Force</code></li>
+          <li>Your Full Name</li>
+          <li>Registered Employee ID or Email Address</li>
+          <li>Company Code / Tenant Identifier</li>
+        </ul>
+        <a href="mailto:privacy@umanexus.com?subject=Account%20and%20Data%20Deletion%20Request%20-%20MIRUS%20Field%20Force" class="btn" style="margin-top: 0.5rem;">Send Deletion Email</a>
+      </div>
+
+      <h2>What Happens When You Request Deletion?</h2>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Data Category</th>
+              <th>Deletion Action</th>
+              <th>Retention Period & Justification</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>User Credentials & Profile</strong></td>
+              <td>Permanently Erased</td>
+              <td>Login credentials, email, password hash, and active session tokens are wiped within 30 days of request confirmation.</td>
+            </tr>
+            <tr>
+              <td><strong>Device & Push Tokens</strong></td>
+              <td>Permanently Erased</td>
+              <td>All FCM / Expo push notification device tokens are immediately unlinked and removed.</td>
+            </tr>
+            <tr>
+              <td><strong>Attendance & Statutory Work Logs</strong></td>
+              <td>Anonymized / Legally Retained</td>
+              <td>Historical attendance and wage logs must be retained for the minimum statutory period required by labor, tax, and corporate governance legislation. After the legal retention period, records are purged or irreversibly anonymized.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2>Questions or Support?</h2>
+      <p>If you have any questions regarding your deletion request, please reach out to <a href="mailto:support@umanexus.com">support@umanexus.com</a>.</p>
+
+      <div class="nav-links" style="margin-top: 2rem;">
+        <a href="/privacy-policy.html" class="btn">View Privacy Policy</a>
+        <a href="/terms.html" class="btn btn-outline">Terms of Service</a>
+      </div>
+    </div>
+  </main>
+  <footer>
+    <p>&copy; 2026 Mirus Med Sciences Pvt. Ltd. All rights reserved.</p>
+    <p style="margin-top: 0.5rem;">
+      <a href="/privacy-policy.html">Privacy Policy</a> &bull;
+      <a href="/terms.html">Terms of Service</a> &bull;
+      <a href="/account-deletion.html">Account & Data Deletion</a>
+    </p>
+  </footer>
+</body>
+</html>

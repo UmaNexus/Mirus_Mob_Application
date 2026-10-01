@@ -4,6 +4,7 @@ import ManagerMoreScreen from '../../screens/manager/ManagerMoreScreen';
 import DcrReviewScreen from '../../screens/manager/DcrReviewScreen';
 import DcrReviewDetailScreen from '../../screens/manager/DcrReviewDetailScreen';
 import CalendarScreen from '../../screens/bdm/CalendarScreen';
+import PrivacyPolicyScreen from '../../screens/PrivacyPolicyScreen';
 import { colors } from '../../theme';
 
 const Stack = createNativeStackNavigator();
@@ -15,6 +16,7 @@ export default function ManagerMoreStack() {
       <Stack.Screen name="DcrReview" component={DcrReviewScreen} options={{ title: 'DCR Review' }} />
       <Stack.Screen name="DcrReviewDetail" component={DcrReviewDetailScreen} options={{ title: 'Daily Report' }} />
       <Stack.Screen name="Calendar" component={CalendarScreen} options={{ title: 'Status Calendar' }} />
+      <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }

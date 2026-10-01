@@ -1,12 +1,13 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Receipt, ListChecks, Store, ChartNoAxesCombined, CalendarDays, Bell, LogOut, Palmtree } from 'lucide-react-native';
+import { Receipt, ListChecks, Store, ChartNoAxesCombined, CalendarDays, Bell, LogOut, Palmtree, ShieldCheck } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { displayName } from '../../navigation/roleHelpers';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
 import BrandLogo from '../../components/BrandLogo';
+import { openAccountDeletionInBrowser } from '../../config/legalUrls';
 import { colors, radii, spacing, typography } from '../../theme';
 
 const ITEMS = [
@@ -16,7 +17,8 @@ const ITEMS = [
   { icon: ChartNoAxesCombined, label: 'Secondary Sales', screen: 'SecondarySales' },
   { icon: CalendarDays, label: 'Calendar', screen: 'Calendar' },
   { icon: Bell, label: 'Alerts', screen: 'Alerts' },
-  { icon: Palmtree, label: 'Apply Leave', screen: 'ApplyLeave' }
+  { icon: Palmtree, label: 'Apply Leave', screen: 'ApplyLeave' },
+  { icon: ShieldCheck, label: 'Privacy Policy', screen: 'PrivacyPolicy' }
 ];
 
 export default function MoreScreen({ navigation }) {
@@ -42,6 +44,16 @@ export default function MoreScreen({ navigation }) {
         <Text style={typography.subtitle}>BDM · {user?.employeeDetails?.fieldForce?.territory || 'MIRUS'}</Text>
         <Button icon={LogOut} title="Sign out" variant="outline" onPress={signOut} style={styles.signOutBtn} />
       </Card>
+
+      <View style={styles.legalFooter}>
+        <Text style={styles.legalLink} onPress={() => navigation.navigate('PrivacyPolicy')}>
+          Privacy Policy
+        </Text>
+        <Text style={styles.legalDot}>•</Text>
+        <Text style={styles.legalLink} onPress={openAccountDeletionInBrowser}>
+          Data & Account Deletion
+        </Text>
+      </View>
     </SafeAreaView>
   );
 }
@@ -52,6 +64,9 @@ const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingHorizontal: spacing.lg },
   item: { width: '47%', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.lg },
   itemLabel: { fontSize: 13, fontWeight: '600', color: colors.ink },
-  account: { margin: spacing.lg, gap: spacing.xs },
-  signOutBtn: { marginTop: spacing.sm }
+  account: { margin: spacing.lg, gap: spacing.xs, marginBottom: spacing.sm },
+  signOutBtn: { marginTop: spacing.sm },
+  legalFooter: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: spacing.sm, paddingBottom: spacing.lg },
+  legalLink: { fontSize: 12, color: colors.muted, textDecorationLine: 'underline' },
+  legalDot: { fontSize: 12, color: colors.muted }
 });

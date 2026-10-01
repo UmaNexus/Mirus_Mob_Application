@@ -1,10 +1,11 @@
 import React from 'react';
 import { View, Text, Pressable, Linking, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LogOut, CalendarDays, ChevronRight, UserCog } from 'lucide-react-native';
+import { LogOut, CalendarDays, ChevronRight, UserCog, ShieldCheck, Trash2 } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { displayName, resolveUserTier } from '../../navigation/roleHelpers';
 import { WEB_APP_URL } from '../../config/webAppUrl';
+import { openAccountDeletionInBrowser } from '../../config/legalUrls';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
 import BrandLogo from '../../components/BrandLogo';
@@ -29,6 +30,9 @@ export default function ExecutiveMoreScreen({ navigation }) {
         </Card>
 
         <NavRow icon={CalendarDays} title="Status Calendar" subtitle="Your holidays, leave, and attendance for the month" onPress={() => navigation.navigate('Calendar')} />
+
+        <NavRow icon={ShieldCheck} title="Privacy Policy" subtitle="Data safety, disclosures, and privacy rights" onPress={() => navigation.navigate('PrivacyPolicy')} />
+        <NavRow icon={Trash2} title="Data & Account Deletion" subtitle="Instructions to delete account and erase data" onPress={openAccountDeletionInBrowser} />
 
         {isAdmin && (
           <NavRow

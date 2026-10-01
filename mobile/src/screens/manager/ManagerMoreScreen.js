@@ -1,9 +1,10 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LogOut, ClipboardList, CalendarDays, ChevronRight } from 'lucide-react-native';
+import { LogOut, ClipboardList, CalendarDays, ChevronRight, ShieldCheck, Trash2 } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
 import { displayName, resolveUserTier } from '../../navigation/roleHelpers';
+import { openAccountDeletionInBrowser } from '../../config/legalUrls';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
 import BrandLogo from '../../components/BrandLogo';
@@ -30,6 +31,8 @@ export default function ManagerMoreScreen({ navigation }) {
 
         <NavRow icon={ClipboardList} title="DCR Review" subtitle="Review your team's submitted daily call reports" onPress={() => navigation.navigate('DcrReview')} />
         <NavRow icon={CalendarDays} title="Status Calendar" subtitle="Your holidays, leave, and attendance for the month" onPress={() => navigation.navigate('Calendar')} />
+        <NavRow icon={ShieldCheck} title="Privacy Policy" subtitle="Data safety, disclosures, and privacy rights" onPress={() => navigation.navigate('PrivacyPolicy')} />
+        <NavRow icon={Trash2} title="Data & Account Deletion" subtitle="Instructions to delete account and erase data" onPress={openAccountDeletionInBrowser} />
 
         <Button icon={LogOut} title="Sign out" variant="outline" onPress={signOut} />
       </View>

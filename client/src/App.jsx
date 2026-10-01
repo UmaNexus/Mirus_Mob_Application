@@ -48,6 +48,13 @@ function RoleIndex() {
   return <Navigate to={MANAGER.includes(user?.role) ? '/dashboard' : '/me'} replace />;
 }
 
+function ExternalRedirect({ to }) {
+  useEffect(() => {
+    window.location.replace(to);
+  }, [to]);
+  return null;
+}
+
 export default function App() {
   const dispatch = useDispatch();
   useEffect(() => { dispatch(bootstrapAuth()); }, [dispatch]);
@@ -59,6 +66,9 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/offer/:token" element={<CandidateOfferPage />} />
         <Route path="/setup-password/:token" element={<SetupPasswordPage />} />
+        <Route path="/privacy-policy" element={<ExternalRedirect to="/privacy-policy.html" />} />
+        <Route path="/account-deletion" element={<ExternalRedirect to="/account-deletion.html" />} />
+        <Route path="/terms" element={<ExternalRedirect to="/terms.html" />} />
 
         {/* Authenticated shell */}
         <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>

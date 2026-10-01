@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { resolveUserTier, isExecutiveTier } from './roleHelpers';
 import LoadingScreen from '../screens/LoadingScreen';
 import LoginScreen from '../screens/LoginScreen';
+import PrivacyPolicyScreen from '../screens/PrivacyPolicyScreen';
 import BdmTabNavigator from './bdm/BdmTabNavigator';
 import ManagerTabNavigator from './manager/ManagerTabNavigator';
 import ExecutiveTabNavigator from './executive/ExecutiveTabNavigator';
@@ -56,6 +57,7 @@ export default function RootNavigator() {
         ) : (
           <Stack.Screen name="Login" component={LoginScreen} />
         )}
+        <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

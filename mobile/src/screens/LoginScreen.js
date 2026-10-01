@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Pressable } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import Button from '../components/Button';
 import ErrorBanner from '../components/ErrorBanner';
 import BrandLogo from '../components/BrandLogo';
+import { openPrivacyPolicyInBrowser, openTermsInBrowser } from '../config/legalUrls';
 import { colors, spacing, radii, typography } from '../theme';
 
 /**
@@ -12,7 +13,7 @@ import { colors, spacing, radii, typography } from '../theme';
  * role picker: the role and field-force tier come back from the server on
  * `user` and drive navigation from there (see navigation/RootNavigator.js).
  */
-export default function LoginScreen() {
+export default function LoginScreen({ navigation }) {
   const { signIn } = useAuth();
   const [companySlug, setCompanySlug] = useState('');
   const [identifier, setIdentifier] = useState('');
@@ -75,6 +76,44 @@ export default function LoginScreen() {
           <ErrorBanner message={error} />
 
           <Button title="Log In" onPress={handleSubmit} loading={submitting} disabled={!canSubmit} style={styles.submit} />
+
+          <View style={styles.legalContainer}>
+            <Text style={styles.legalText}>
+              By logging in, you agree to our{' '}
+              <Text style={styles.legalLink} onPress={openTermsInBrowser}>
+                Terms of Service
+              </Text>{' '}
+              and{' '}
+              <Text
+                style={styles.legalLink}
+                onPress={() => {
+                  if (navigation?.navigate) {
+                    navigation.navigate('PrivacyPolicy');
+                  } else {
+                    openPrivacyPolicyInBrowser();
+                  }
+                }}
+              >
+                Privacy Policy
+              </Text>
+              .
+            </Text>
+
+            <Pressable
+              onPress={() => {
+                if (navigation?.navigate) {
+                  navigation.navigate('PrivacyPolicy');
+                } else {
+                  openPrivacyPolicyInBrowser();
+                }
+              }}
+              style={({ pressed }) => [styles.privacyBadgeBtn, pressed && { opacity: 0.7 }]}
+              accessibilityRole="button"
+              accessibilityLabel="View Privacy Policy and Data Safety Disclosures"
+            >
+              <Text style={styles.privacyBadgeText}>🔒 Privacy Policy & Data Safety</Text>
+            </Pressable>
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -97,5 +136,35 @@ const styles = StyleSheet.create({
     color: colors.ink,
     backgroundColor: colors.surface
   },
-  submit: { marginTop: spacing.xl }
+  submit: { marginTop: spacing.xl },
+  legalContainer: {
+    marginTop: spacing.xl,
+    alignItems: 'center',
+    gap: spacing.sm
+  },
+  legalText: {
+    fontSize: 12,
+    color: colors.muted,
+    textAlign: 'center',
+    lineHeight: 18
+  },
+  legalLink: {
+    color: colors.primary,
+    fontWeight: '600',
+    textDecorationLine: 'underline'
+  },
+  privacyBadgeBtn: {
+    marginTop: spacing.xs,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: radii.pill,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line
+  },
+  privacyBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.ink
+  }
 });

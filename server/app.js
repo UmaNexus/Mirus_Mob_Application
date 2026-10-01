@@ -41,6 +41,7 @@ import secondarySaleRoutes from './routes/secondarySaleRoutes.js';
 import fieldForceReportingRoutes from './routes/fieldForceReportingRoutes.js';
 import adminHierarchyRoutes from './routes/adminHierarchyRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
+import legalRoutes from './routes/legalRoutes.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
 import { tenantContextMiddleware } from './utils/tenantContext.js';
 import { corsOrigins } from './utils/clientOrigin.js';
@@ -73,6 +74,9 @@ app.use('/uploads', express.static(path.resolve('uploads')));
 
 app.get('/', (req, res) => res.json({ success: true, message: 'HRMS API Server is running', health: '/api/health' }));
 app.get('/api/health', (req, res) => res.json({ success: true, status: 'ok' }));
+
+// Public legal & compliance routes (Google Play Privacy Policy, Data Deletion, Terms)
+app.use('/', legalRoutes);
 
 app.use('/api/tenants', tenantRoutes);
 app.use('/api/auth', authRoutes);
