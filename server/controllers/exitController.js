@@ -24,6 +24,9 @@ export const initiateExit = asyncHandler(async (req, res) => {
   if (existing) throw new ApiError(400, 'An exit has already been initiated for this employee');
 
   const record = await ExitRecord.create({ userId, resignationDate, lastWorkingDay, reason, status: 'Initiated' });
+  if (record.lastWorkingDay && new Date(record.lastWorkingDay) <= new Date()) {
+    await User.findByIdAndUpdate(userId, { isActive: false });
+  }
   await record.populate('userId', 'email personalDetails.firstName personalDetails.lastName employeeDetails.employeeId');
   await logActivity({
     actor: req.user,
@@ -75,6 +78,13 @@ export const updateExit = asyncHandler(async (req, res) => {
   }
   if (req.body.status && ['Initiated', 'InProgress', 'Completed'].includes(req.body.status)) record.status = req.body.status;
   await record.save();
+
+  // If exit is completed, F&F settled, or lastWorkingDay has passed, deactivate the user account
+  const isPastLWD = record.lastWorkingDay && new Date(record.lastWorkingDay) <= new Date();
+  if (record.status === 'Completed' || record.fnfSettlement?.status === 'Settled' || isPastLWD) {
+    await User.findByIdAndUpdate(record.userId, { isActive: false });
+  }
+
   res.status(200).json({ success: true, message: 'Exit record updated', record });
 });
 
@@ -156,6 +166,11 @@ export const generateExitLetters = asyncHandler(async (req, res) => {
   }
 
   await record.save();
+
+  if (!previewOnly && record.lastWorkingDay && new Date(record.lastWorkingDay) <= new Date()) {
+    await User.findByIdAndUpdate(record.userId, { isActive: false });
+  }
+
   await logActivity({
     actor: req.user,
     action: previewOnly ? 'exit.fnf_preview' : 'exit.letters',

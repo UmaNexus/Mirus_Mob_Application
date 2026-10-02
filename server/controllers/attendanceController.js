@@ -4,6 +4,7 @@ import Attendance from '../models/Attendance.js';
 import LeaveRequest from '../models/LeaveRequest.js';
 import Holiday from '../models/Holiday.js';
 import User from '../models/User.js';
+import ExitRecord from '../models/ExitRecord.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import {
@@ -48,6 +49,17 @@ const monthRange = (month, year) => {
 const upsertAttendance = async ({ userId, body, markedBy }) => {
   const date = body.date ? new Date(body.date) : new Date();
   const dateKey = dateKeyOf(date);
+
+  // Guard against recording attendance for dates past the employee's last working day
+  const exit = await ExitRecord.findOne({
+    userId,
+    status: { $in: ['Initiated', 'InProgress', 'Completed'] }
+  }).select('lastWorkingDay');
+
+  if (exit?.lastWorkingDay && dateKey > dateKeyOf(exit.lastWorkingDay)) {
+    throw new ApiError(400, `Cannot record attendance for dates after employee's last working day (${dateKeyOf(exit.lastWorkingDay)})`);
+  }
+
   const update = {
     date,
     status: body.status || 'Present',
@@ -100,6 +112,16 @@ export const listMyAttendance = asyncHandler(async (req, res) => {
 export const punchIn = asyncHandler(async (req, res) => {
   const now = new Date();
   const dateKey = dateKeyOf(now);
+
+  const exit = await ExitRecord.findOne({
+    userId: req.user._id,
+    status: { $in: ['Initiated', 'InProgress', 'Completed'] }
+  }).select('lastWorkingDay');
+
+  if (exit?.lastWorkingDay && dateKey > dateKeyOf(exit.lastWorkingDay)) {
+    throw new ApiError(403, `Cannot punch in after your last working day (${dateKeyOf(exit.lastWorkingDay)})`);
+  }
+
   const existing = await Attendance.findOne({ userId: req.user._id, dateKey });
   if (existing?.punchInAt && !existing?.punchOutAt) {
     throw new ApiError(400, 'Already punched in — punch out first');
@@ -176,9 +198,16 @@ export const markBulkAttendance = asyncHandler(async (req, res) => {
 
   let count = 0;
   for (const userId of valid) {
-    // eslint-disable-next-line no-await-in-loop
-    await upsertAttendance({ userId, body: { date, status, checkIn, checkOut }, markedBy: req.user._id });
-    count += 1;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await upsertAttendance({ userId, body: { date, status, checkIn, checkOut }, markedBy: req.user._id });
+      count += 1;
+    } catch (err) {
+      if (err.statusCode === 400 && err.message?.includes('last working day')) {
+        continue;
+      }
+      throw err;
+    }
   }
   res.status(200).json({ success: true, message: `Attendance recorded for ${count} employee(s)`, count });
 });
