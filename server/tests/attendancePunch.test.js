@@ -13,7 +13,7 @@ test('unauthenticated request is rejected', async () => {
   assert.equal((await request(app).post('/api/attendance/punch-in')).status, 401);
 });
 
-test('a plain employee with no fieldForce tier CAN use the punch endpoints — only Admin/superadmin are excluded', async () => {
+test('a plain employee with no field-force role CAN use the punch endpoints — only Admin/superadmin are excluded', async () => {
   const { agent } = await authAgent(app, { email: 'plain@xyz.com', role: 'employee' });
   const res = await agent.post('/api/attendance/punch-in');
   assert.equal(res.status, 200);
@@ -34,7 +34,7 @@ test('admin cannot use the punch endpoints', async () => {
 });
 
 test('a BDM can punch in, see today\'s status, and punch out with worked hours computed', async () => {
-  const { agent } = await authAgent(app, { email: 'bdm@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  const { agent } = await authAgent(app, { email: 'bdm@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
 
   const before = await agent.get('/api/attendance/today');
   assert.equal(before.status, 200);
@@ -56,20 +56,20 @@ test('a BDM can punch in, see today\'s status, and punch out with worked hours c
 });
 
 test('punching in twice without punching out is rejected', async () => {
-  const { agent } = await authAgent(app, { email: 'bdm2@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  const { agent } = await authAgent(app, { email: 'bdm2@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
   await agent.post('/api/attendance/punch-in');
   const again = await agent.post('/api/attendance/punch-in');
   assert.equal(again.status, 400);
 });
 
 test('punching out without having punched in is rejected', async () => {
-  const { agent } = await authAgent(app, { email: 'bdm3@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  const { agent } = await authAgent(app, { email: 'bdm3@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
   const res = await agent.post('/api/attendance/punch-out');
   assert.equal(res.status, 400);
 });
 
 test('punching out twice is rejected', async () => {
-  const { agent } = await authAgent(app, { email: 'bdm4@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  const { agent } = await authAgent(app, { email: 'bdm4@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
   await agent.post('/api/attendance/punch-in');
   await agent.post('/api/attendance/punch-out');
   const again = await agent.post('/api/attendance/punch-out');
@@ -77,7 +77,7 @@ test('punching out twice is rejected', async () => {
 });
 
 test('existing whole-day attendance marking is unaffected by the new punch fields', async () => {
-  const { agent } = await authAgent(app, { email: 'bdm5@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  const { agent } = await authAgent(app, { email: 'bdm5@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
   const marked = await agent.post('/api/attendance/mark').send({ status: 'Present', checkIn: '09:00', checkOut: '18:00' });
   assert.equal(marked.status, 200);
   assert.equal(marked.body.record.checkIn, '09:00');

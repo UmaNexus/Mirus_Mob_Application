@@ -40,7 +40,7 @@ export default function AdminDashboardPage() {
     <div>
       <PageHeader
         title="Organization Hierarchy"
-        subtitle="Organization hierarchy, role assignment, and permissions : Admin → NSM → ZSM → RSM → ASM → BDM"
+        subtitle="Organization hierarchy, role assignment, and permissions : who reports to whom, and each person's job role"
       />
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>

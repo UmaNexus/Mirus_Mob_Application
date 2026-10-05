@@ -20,9 +20,9 @@ router.get('/monitor', requireFieldCapability(PERMISSIONS.FIELDOPS_MONITOR, 'ASM
 router.get('/team-performance', requireFieldCapability(PERMISSIONS.FIELDOPS_MONITOR, 'ASM'), getTeamPerformance);
 router.get('/team-attendance', requireFieldCapability(PERMISSIONS.FIELDOPS_MONITOR, 'ASM'), getTeamAttendance);
 
-// NSM/Admin executive monitoring — same capability gate as the ASM+ endpoints
-// above; NSM already clears 'ASM' via tierAtLeast, admin/superadmin via their
-// existing FIELDOPS_MONITOR permission. Read-only: no approval/decision route.
+// Executive monitoring — same capability gate as the manager-level endpoints above: a manager-role
+// JobRole holder (their own subtree), or admin/superadmin via their existing FIELDOPS_MONITOR
+// permission. Read-only: no approval/decision route.
 router.get('/org-summary', requireFieldCapability(PERMISSIONS.FIELDOPS_MONITOR, 'ASM'), getOrgSummary);
 router.get('/tier-directory', requireFieldCapability(PERMISSIONS.FIELDOPS_MONITOR, 'ASM'), getTierDirectory);
 router.get('/reports-summary', requireFieldCapability(PERMISSIONS.FIELDOPS_MONITOR, 'ASM'), getReportsSummary);

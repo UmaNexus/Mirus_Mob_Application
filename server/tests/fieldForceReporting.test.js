@@ -21,10 +21,10 @@ const setupAsmBdm = async () => {
   setupCounter += 1;
   const n = setupCounter;
   const company = await getDefaultCompany();
-  const { agent: asmAgent, user: asm } = await authAgent(app, { email: `asm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: `asm_${n}@xyz.com`, employeeDetails: { fieldRole: 'ASM' } });
   const bdm = await createUser({
     companyId: company._id, email: `bdm_${n}@xyz.com`, password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
   const bdmAgent = await loginAs(company, bdm);
   return { company, asmAgent, asm, bdm, bdmAgent };
@@ -39,7 +39,7 @@ test('unauthenticated requests are rejected on every reporting endpoint', async 
   assert.equal((await request(app).get('/api/field-force/monitor')).status, 401);
 });
 
-test('an employee with no fieldForce tier is denied all reporting endpoints', async () => {
+test('an employee with no field-force role is denied all reporting endpoints', async () => {
   const { agent } = await authAgent(app, { email: 'plain@xyz.com', role: 'employee' });
   assert.equal((await agent.get('/api/field-force/calendar')).status, 403);
   assert.equal((await agent.get('/api/field-force/dashboard')).status, 403);
@@ -57,7 +57,7 @@ test('a BDM\'s reporting chain returns their real manager, and only their real m
 });
 
 test('a top-of-chain user (no reportingManagerId) gets an empty chain, not an error', async () => {
-  const { agent } = await authAgent(app, { email: 'orphan@xyz.com', employeeDetails: { fieldForce: { tier: 'NSM' } } });
+  const { agent } = await authAgent(app, { email: 'orphan@xyz.com', employeeDetails: { fieldRole: 'NSM' } });
   const res = await agent.get('/api/field-force/my-chain');
   assert.equal(res.status, 200);
   assert.deepEqual(res.body.data, []);
@@ -69,9 +69,9 @@ test('joint-call-participants returns managers (real chain, ASM+, never Admin) a
   const { company, bdmAgent, asm } = await setupAsmBdm();
   const teammate = await createUser({
     companyId: company._id, email: 'teammate-participants@xyz.com',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
-  const unrelatedBdm = await createUser({ companyId: company._id, email: 'unrelated-participants@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  const unrelatedBdm = await createUser({ companyId: company._id, email: 'unrelated-participants@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
 
   const res = await bdmAgent.get('/api/field-force/joint-call-participants');
   assert.equal(res.status, 200);
@@ -85,10 +85,10 @@ test('joint-call-participants returns managers (real chain, ASM+, never Admin) a
 test('joint-call-participants never returns Admin among managers, even when Admin is the literal top of the reporting chain', async () => {
   const company = await getDefaultCompany();
   const { user: admin } = await authAgent(app, { company, email: 'admin-participants@xyz.com', role: 'admin' });
-  const nsm = await createUser({ companyId: company._id, email: 'nsm-participants@xyz.com', employeeDetails: { fieldForce: { tier: 'NSM' }, reportingManagerId: admin._id } });
+  const nsm = await createUser({ companyId: company._id, email: 'nsm-participants@xyz.com', employeeDetails: { fieldRole: 'NSM', reportingManagerId: admin._id } });
   const bdm = await createUser({
     companyId: company._id, email: 'bdm-participants@xyz.com', password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: nsm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: nsm._id }
   });
   const bdmAgent = await loginAs(company, bdm);
 
@@ -100,7 +100,7 @@ test('joint-call-participants never returns Admin among managers, even when Admi
 });
 
 test('joint-call-participants "others" is empty for a top-of-chain user with no manager', async () => {
-  const { agent } = await authAgent(app, { email: 'orphan-participants@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  const { agent } = await authAgent(app, { email: 'orphan-participants@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
   const res = await agent.get('/api/field-force/joint-call-participants');
   assert.equal(res.status, 200);
   assert.deepEqual(res.body.data.others, []);
@@ -259,7 +259,7 @@ test('an admin in one company never sees another company\'s monitor data', async
   const companyA = await createCompany({ slug: 'ffr-alpha' });
   const companyB = await createCompany({ slug: 'ffr-beta' });
   const { agent: adminA } = await authAgent(app, { company: companyA, email: 'admin-a@xyz.com', role: 'admin' });
-  await createUser({ companyId: companyB._id, email: 'bdm-b@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  await createUser({ companyId: companyB._id, email: 'bdm-b@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
 
   const res = await adminA.get('/api/field-force/monitor');
   assert.equal(res.status, 200);
@@ -273,16 +273,15 @@ test('a BDM cannot reach team-performance (ASM+ only)', async () => {
   assert.equal((await bdmAgent.get('/api/field-force/team-performance')).status, 403);
 });
 
-test('team-performance returns only the caller\'s own subtree BDMs, with real name/employeeId/territory', async () => {
+test('team-performance returns only the caller\'s own subtree BDMs, with real name/employeeId', async () => {
   const company = await getDefaultCompany();
   const { asmAgent, bdm, bdmAgent } = await setupAsmBdm();
   await createUser({
-    companyId: company._id, employeeDetails: { fieldForce: { tier: 'BDM' } },
+    companyId: company._id, employeeDetails: { fieldRole: 'BDM' },
     email: 'unrelated-perf-bdm@xyz.com'
   });
   const bdmDoc = await (await import('../models/User.js')).default.findById(bdm._id);
   bdmDoc.employeeDetails.employeeId = 'PERF-BDM-1';
-  bdmDoc.employeeDetails.fieldForce.territory = 'Pune Central';
   bdmDoc.personalDetails.firstName = 'Priya';
   bdmDoc.personalDetails.lastName = 'Desai';
   await bdmDoc.save();
@@ -296,7 +295,6 @@ test('team-performance returns only the caller\'s own subtree BDMs, with real na
   const row = res.body.data[0];
   assert.equal(row.name, 'Priya Desai');
   assert.equal(row.employeeId, 'PERF-BDM-1');
-  assert.equal(row.territory, 'Pune Central');
   assert.ok(['top', 'active', 'review', 'low'].includes(row.status));
 });
 
@@ -304,8 +302,8 @@ test('team-performance is company-wide for admin, and tenant-isolated', async ()
   const companyA = await createCompany({ slug: 'perf-alpha' });
   const companyB = await createCompany({ slug: 'perf-beta' });
   const { agent: adminA } = await authAgent(app, { company: companyA, email: 'admin-a-perf@xyz.com', role: 'admin' });
-  await createUser({ companyId: companyA._id, email: 'bdm-a-perf@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
-  await createUser({ companyId: companyB._id, email: 'bdm-b-perf@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  await createUser({ companyId: companyA._id, email: 'bdm-a-perf@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
+  await createUser({ companyId: companyB._id, email: 'bdm-b-perf@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
 
   const res = await adminA.get('/api/field-force/team-performance');
   assert.equal(res.status, 200);
@@ -325,7 +323,7 @@ test('team-attendance (today) reports punched-in status correctly, scoped to the
   const { bdmAgent: unrelatedBdmAgent } = await setupAsmBdm();
   const secondBdm = await createUser({
     companyId: company._id, email: 'second-att-bdm@xyz.com',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
 
   await bdmAgent.post('/api/attendance/punch-in');
@@ -350,8 +348,8 @@ test('team-attendance never includes a BDM outside the caller\'s reporting subtr
   const companyA = await createCompany({ slug: 'att-alpha' });
   const companyB = await createCompany({ slug: 'att-beta' });
   const { agent: adminA } = await authAgent(app, { company: companyA, email: 'admin-a-att@xyz.com', role: 'admin' });
-  await createUser({ companyId: companyA._id, email: 'bdm-a-att@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
-  await createUser({ companyId: companyB._id, email: 'bdm-b-att@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  await createUser({ companyId: companyA._id, email: 'bdm-a-att@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
+  await createUser({ companyId: companyB._id, email: 'bdm-b-att@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
 
   const res = await adminA.get('/api/field-force/team-attendance');
   assert.equal(res.status, 200);

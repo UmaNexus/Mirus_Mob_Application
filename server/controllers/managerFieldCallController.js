@@ -5,6 +5,7 @@ import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { logActivity } from '../services/activityService.js';
 import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds } from '../middleware/fieldForceAuth.js';
+import { roleOf, isFieldUser, JOB_ROLE_POPULATE } from '../services/fieldIdentity.js';
 
 /** POST /api/manager-field-calls — a manager (ASM+) logs their own field visit. */
 export const createManagerFieldCall = asyncHandler(async (req, res) => {
@@ -26,14 +27,14 @@ export const createManagerFieldCall = asyncHandler(async (req, res) => {
     }
   }
 
-  const tier = req.user.employeeDetails?.fieldForce?.tier;
-  if (!tier && !hasCompanyWideFieldOpsAccess(req.user)) {
-    throw new ApiError(403, 'A field-force tier is required to log a manager field call');
+  const role = roleOf(req.user);
+  if (!isFieldUser(req.user) && !hasCompanyWideFieldOpsAccess(req.user)) {
+    throw new ApiError(403, 'A field-force role is required to log a manager field call');
   }
 
   const call = await ManagerFieldCall.create({
     userId: req.user._id,
-    tier: tier || 'NSM', // admin/superadmin without a tier of their own are recorded at the top tier for reporting purposes
+    jobRoleName: role.name || null, // JobRole.name snapshot at logging time
     area, visitType, reason, doctorId: doctorId || null, contactName, speciality,
     productsDetailed, samplesGiven, feedback,
     loggedAt: loggedAt ? new Date(loggedAt) : new Date()
@@ -72,7 +73,7 @@ export const listTeamManagerFieldCalls = asyncHandler(async (req, res) => {
 
   const calls = await ManagerFieldCall.find(filter)
     .populate('doctorId', 'name speciality')
-    .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce')
+    .populate({ path: 'userId', select: 'personalDetails.firstName personalDetails.lastName employeeDetails.jobRole', populate: JOB_ROLE_POPULATE })
     .sort({ loggedAt: -1 })
     .limit(2000);
   res.status(200).json({ success: true, data: calls });

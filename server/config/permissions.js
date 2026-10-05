@@ -49,11 +49,11 @@ export const PERMISSIONS = {
   TENANT_MANAGE: 'tenant:manage',
 
   // --- Mobile field-force (business-ops app) ---
-  // Day-to-day field-force capabilities are gated by `fieldForce.tier` (see
-  // middleware/fieldForceAuth.js), not by these role-based permissions. These
+  // Day-to-day field-force capabilities are gated by the user's JobRole (see
+  // middleware/fieldForceAuth.js, config/fieldRoles.js), not by these role-based permissions. These
   // permission entries exist so admin/superadmin (who hold '*'/ADMIN already)
   // get automatic, explicit company-wide field-ops access without needing a
-  // fieldForce.tier of their own.
+  // field-force JobRole of their own.
   ATTENDANCE_PUNCH: 'attendance:punch',
   DOCTOR_VIEW: 'doctor:view',
   DOCTOR_MANAGE: 'doctor:manage',

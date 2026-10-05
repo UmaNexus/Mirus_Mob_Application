@@ -15,9 +15,10 @@ import {
 import { PERMISSIONS, roleHasPermission } from '../config/permissions.js';
 import { buildReportingSubtreeIds, canAccessFieldOpsUser } from '../middleware/fieldForceAuth.js';
 import { buildApprovalInfo } from '../utils/approvalInfo.js';
+import { JOB_ROLE_POPULATE } from '../services/fieldIdentity.js';
 import { dispatchNotification } from '../services/notificationService.js';
 
-const LEAVE_APPROVER_SELECT = 'personalDetails.firstName personalDetails.lastName role employeeDetails.fieldForce employeeDetails.employeeId';
+const LEAVE_APPROVER_SELECT = 'personalDetails.firstName personalDetails.lastName role employeeDetails.jobRole employeeDetails.employeeId';
 
 
 const dateKeyOf = (d) => new Date(d).toISOString().slice(0, 10); // 'YYYY-MM-DD'
@@ -572,14 +573,14 @@ export const listLeaves = asyncHandler(async (req, res) => {
   const leaves = await LeaveRequest.find(filter)
     .populate({
       path: 'userId',
-      select: 'email personalDetails.firstName personalDetails.lastName employeeDetails.employeeId employeeDetails.fieldForce employeeDetails.reportingManagerId',
+      select: 'email personalDetails.firstName personalDetails.lastName employeeDetails.employeeId employeeDetails.reportingManagerId',
       // LeaveRequest has no designated-approver field of its own (unlike
       // Expense/MTP, `approverId` stays null until decided) — nested-populate
       // the requester's CURRENT manager so a still-pending leave can show
       // "Pending from <name>" (see buildApprovalInfo's `pendingApproverFallback`).
-      populate: { path: 'employeeDetails.reportingManagerId', select: LEAVE_APPROVER_SELECT }
+      populate: { path: 'employeeDetails.reportingManagerId', select: LEAVE_APPROVER_SELECT, populate: JOB_ROLE_POPULATE }
     })
-    .populate('approverId', LEAVE_APPROVER_SELECT)
+    .populate({ path: 'approverId', select: LEAVE_APPROVER_SELECT, populate: JOB_ROLE_POPULATE })
     .sort({ createdAt: -1 })
     .limit(1000);
 

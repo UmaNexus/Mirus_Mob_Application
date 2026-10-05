@@ -15,14 +15,4 @@ const JobRoleSchema = new mongoose.Schema({
 JobRoleSchema.index({ companyId: 1, name: 1 }, { unique: true });
 JobRoleSchema.plugin(tenantScope);
 
-/** Default roles seeded for each company under Setup → Roles. */
-export const DEFAULT_JOB_ROLES = [
-  'Business development manager',
-  'Area development manager',
-  'Zonal development manager',
-  'Regional sales manager',
-  'Office head',
-  'HR'
-];
-
 export default mongoose.model('JobRole', JobRoleSchema);

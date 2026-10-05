@@ -8,7 +8,7 @@ import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import * as attendanceApi from '../../api/attendance';
 import * as fieldForceApi from '../../api/fieldForce';
 import * as dcrApi from '../../api/dcr';
-import { displayName } from '../../navigation/roleHelpers';
+import { displayName, roleNameOf } from '../../navigation/roleHelpers';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
 import StatusBadge from '../../components/StatusBadge';
@@ -97,7 +97,7 @@ export default function BdmHomeScreen({ navigation, route }) {
           <BrandLogo variant="mark" size={28} boxed />
           <View style={styles.heroText}>
             <Text style={styles.heroName}>{displayName(user)}</Text>
-            <Text style={styles.heroSub}>BDM · {user?.employeeDetails?.fieldForce?.territory || 'MIRUS'}</Text>
+            <Text style={styles.heroSub}>{roleNameOf(user) || 'Field'} · MIRUS</Text>
           </View>
           <NotificationBell
             color={colors.white}

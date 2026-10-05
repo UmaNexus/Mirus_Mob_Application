@@ -22,10 +22,10 @@ const setupAsmBdm = async () => {
   setupCounter += 1;
   const n = setupCounter;
   const company = await getDefaultCompany();
-  const { agent: asmAgent, user: asm } = await authAgent(app, { email: `asm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: `asm_${n}@xyz.com`, employeeDetails: { fieldRole: 'ASM' } });
   const bdm = await createUser({
     companyId: company._id, email: `bdm_${n}@xyz.com`, password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
   const bdmAgent = await loginAs(company, bdm);
   return { company, asmAgent, asm, bdm, bdmAgent };
@@ -37,7 +37,7 @@ test('unauthenticated request is rejected', async () => {
   assert.equal((await request(app).get('/api/mtp')).status, 401);
 });
 
-test('an employee with no fieldForce tier is denied', async () => {
+test('an employee with no field-force role is denied', async () => {
   const { agent } = await authAgent(app, { email: 'plain@xyz.com', role: 'employee' });
   assert.equal((await agent.get('/api/mtp')).status, 403);
   assert.equal((await agent.post('/api/mtp').send({ month: '2026-08' })).status, 403);
@@ -56,22 +56,22 @@ const setupFullChain = async () => {
   const n = setupCounter;
   const company = await getDefaultCompany();
   const { agent: adminAgent, user: admin } = await authAgent(app, { company, email: `admin_${n}@xyz.com`, role: 'admin' });
-  const nsm = await createUser({ companyId: company._id, email: `nsm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'NSM', territory: 'National' } } });
+  const nsm = await createUser({ companyId: company._id, email: `nsm_${n}@xyz.com`, employeeDetails: { fieldRole: 'NSM' } });
   const zsm = await createUser({
     companyId: company._id, email: `zsm_${n}@xyz.com`,
-    employeeDetails: { fieldForce: { tier: 'ZSM', territory: 'South Zone' }, reportingManagerId: nsm._id }
+    employeeDetails: { fieldRole: 'ZSM', reportingManagerId: nsm._id }
   });
   const rsm = await createUser({
     companyId: company._id, email: `rsm_${n}@xyz.com`,
-    employeeDetails: { fieldForce: { tier: 'RSM', territory: 'Telangana' }, reportingManagerId: zsm._id }
+    employeeDetails: { fieldRole: 'RSM', reportingManagerId: zsm._id }
   });
   const asm = await createUser({
     companyId: company._id, email: `asm_${n}@xyz.com`, password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'ASM', territory: 'Hyderabad' }, reportingManagerId: rsm._id }
+    employeeDetails: { fieldRole: 'ASM', reportingManagerId: rsm._id }
   });
   const bdm = await createUser({
     companyId: company._id, email: `bdm_${n}@xyz.com`, password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
   const bdmAgent = await loginAs(company, bdm);
   const asmAgent = await loginAs(company, asm);
@@ -96,17 +96,17 @@ test('ASM, RSM, ZSM, NSM and Admin all appear when legitimately above the BDM', 
   const { bdmAgent, asm, rsm, zsm, nsm, admin } = await setupFullChain();
   const res = await bdmAgent.get('/api/mtp/approvers');
   const byId = Object.fromEntries(res.body.data.map((u) => [String(u._id), u]));
-  assert.equal(byId[String(asm._id)].employeeDetails.fieldForce.tier, 'ASM');
-  assert.equal(byId[String(rsm._id)].employeeDetails.fieldForce.tier, 'RSM');
-  assert.equal(byId[String(zsm._id)].employeeDetails.fieldForce.tier, 'ZSM');
-  assert.equal(byId[String(nsm._id)].employeeDetails.fieldForce.tier, 'NSM');
+  assert.equal(byId[String(asm._id)].employeeDetails.jobRole.name, 'Area sales manager');
+  assert.equal(byId[String(rsm._id)].employeeDetails.jobRole.name, 'Regional business manager');
+  assert.equal(byId[String(zsm._id)].employeeDetails.jobRole.name, 'Zonal sales manager');
+  assert.equal(byId[String(nsm._id)].employeeDetails.jobRole.name, 'Zonal sales manager');
   assert.ok(byId[String(admin._id)], 'admin must appear as an eligible approver');
 });
 
 test('an unrelated manager (not above this BDM) does not appear in the eligible-approver list', async () => {
   const { bdmAgent } = await setupFullChain();
   const company = await getDefaultCompany();
-  const unrelatedAsm = await createUser({ companyId: company._id, email: 'unrelated-asm@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const unrelatedAsm = await createUser({ companyId: company._id, email: 'unrelated-asm@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
 
   const res = await bdmAgent.get('/api/mtp/approvers');
   const ids = res.body.data.map((u) => String(u._id));
@@ -129,7 +129,7 @@ test('another BDM cannot be selected as an approver', async () => {
 test('a cross-tenant user cannot be selected as an approver, even with the right tier', async () => {
   const { bdmAgent } = await setupFullChain();
   const companyB = await createCompany({ slug: 'mtp-approver-cross-tenant' });
-  const crossTenantAsm = await createUser({ companyId: companyB._id, email: 'cross-tenant-asm@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const crossTenantAsm = await createUser({ companyId: companyB._id, email: 'cross-tenant-asm@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
 
   const created = await bdmAgent.post('/api/mtp').send({ month: '2026-08' });
   const submitted = await bdmAgent.patch(`/api/mtp/${created.body.mtp._id}/submit`).send({ approverId: String(crossTenantAsm._id) });
@@ -509,7 +509,7 @@ test('Admin can retrieve company-wide MTPs via /team, never another tenant\'s', 
   await bdmAgent.post('/api/mtp').send({ month: '2026-09' });
 
   const companyB = await createCompany({ slug: 'mtp-team-admin-scope' });
-  const bdmB = await createUser({ companyId: companyB._id, email: 'bdm-b-team@xyz.com', password: 'Password1', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  const bdmB = await createUser({ companyId: companyB._id, email: 'bdm-b-team@xyz.com', password: 'Password1', employeeDetails: { fieldRole: 'BDM' } });
   const bdmBAgent = await loginAs(companyB, bdmB);
   await bdmBAgent.post('/api/mtp').send({ month: '2026-09' });
 
@@ -615,7 +615,7 @@ test('an admin in one company never sees MTPs from another company via /team', a
   const companyA = await createCompany({ slug: 'mtp-alpha' });
   const companyB = await createCompany({ slug: 'mtp-beta' });
   const { agent: adminA } = await authAgent(app, { company: companyA, email: 'admin-a@xyz.com', role: 'admin' });
-  const bdmB = await createUser({ companyId: companyB._id, email: 'bdm-b@xyz.com', password: 'Password1', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  const bdmB = await createUser({ companyId: companyB._id, email: 'bdm-b@xyz.com', password: 'Password1', employeeDetails: { fieldRole: 'BDM' } });
   const bdmBAgent = await loginAs(companyB, bdmB);
   await bdmBAgent.post('/api/mtp').send({ month: '2026-08' });
 

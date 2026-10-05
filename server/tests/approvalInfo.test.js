@@ -21,10 +21,10 @@ let n = 0;
 const setupAsmBdm = async () => {
   n += 1;
   const company = await getDefaultCompany();
-  const { agent: asmAgent, user: asm } = await authAgent(app, { company, email: `asm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { company, email: `asm_${n}@xyz.com`, employeeDetails: { fieldRole: 'ASM' } });
   const bdm = await createUser({
     companyId: company._id, email: `bdm_${n}@xyz.com`, password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
   const bdmAgent = await loginAs(company, bdm);
   return { company, asmAgent, asm, bdmAgent, bdm };
@@ -45,7 +45,7 @@ test('an approved expense report row shows the actual approver, not derived from
   assert.equal(row.approval.status, 'approved');
   assert.equal(String(row.approval.decidedBy.userId), String(asm._id));
   assert.equal(row.approval.decidedBy.name, `${asm.personalDetails.firstName} ${asm.personalDetails.lastName}`);
-  assert.equal(row.approval.decidedBy.role, 'ASM');
+  assert.equal(row.approval.decidedBy.role, 'Area sales manager');
   assert.ok(row.approval.decidedAt);
   assert.equal(row.approval.reason, 'Looks good');
 });
@@ -73,7 +73,7 @@ test('a pending expense report row never shows a decidedBy, but does show who it
   assert.equal(row.approval.decidedBy, null);
   assert.equal(row.approval.decidedAt, null);
   assert.equal(String(row.approval.pendingWith.userId), String(asm._id));
-  assert.equal(row.approval.pendingWith.role, 'ASM');
+  assert.equal(row.approval.pendingWith.role, 'Area sales manager');
 });
 
 // ---------- Leave ----------
@@ -144,7 +144,7 @@ test('a historical decision keeps showing the ORIGINAL approver after the BDM is
 
   // Re-parent the BDM to a brand-new ASM — the reporting hierarchy changes,
   // but the historical decision record must not.
-  const newAsm = await createUser({ companyId: company._id, email: `new-asm-${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const newAsm = await createUser({ companyId: company._id, email: `new-asm-${n}@xyz.com`, employeeDetails: { fieldRole: 'ASM' } });
   const { agent: adminAgent } = await authAgent(app, { company, email: `admin-${n}@xyz.com`, role: 'admin' });
   const reassign = await adminAgent.put(`/api/users/${bdm._id}`).send({ reportingManagerId: String(newAsm._id) });
   assert.equal(reassign.status, 200);

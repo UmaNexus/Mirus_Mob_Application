@@ -6,6 +6,7 @@ import FormDialog from '../../components/ui/FormDialog.jsx';
 import { replaceManager } from '../../api/admin.js';
 import { fullName } from '../../config/constants.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
+import { roleLabelOf, roleKeyOf } from '../../config/roleLabel.js';
 
 const flattenHierarchy = (hierarchy) => {
   if (!hierarchy) return [];
@@ -29,11 +30,12 @@ export default function ReplaceManagerDialog({ open, manager, hierarchy, onClose
 
   useEffect(() => { setNewManagerId(''); }, [manager]);
 
-  const tier = manager?.employeeDetails?.fieldForce?.tier;
+  const tier = roleLabelOf(manager);
+  const roleKey = roleKeyOf(manager);
   const allUsers = useMemo(() => flattenHierarchy(hierarchy), [hierarchy]);
   const candidates = useMemo(
-    () => allUsers.filter((u) => u.employeeDetails?.fieldForce?.tier === tier && String(u._id) !== String(manager?._id)),
-    [allUsers, tier, manager]
+    () => allUsers.filter((u) => roleKey && roleKeyOf(u) === roleKey && String(u._id) !== String(manager?._id)),
+    [allUsers, roleKey, manager]
   );
 
   const submit = async (e) => {
@@ -64,9 +66,9 @@ export default function ReplaceManagerDialog({ open, manager, hierarchy, onClose
             : 'This manager currently has no direct reports.'}
         </p>
         <TextField
-          select label={`Replacement (must already be a ${tier})`} value={newManagerId} onChange={(e) => setNewManagerId(e.target.value)}
+          select label={`Replacement (must hold the same role: ${tier})`} value={newManagerId} onChange={(e) => setNewManagerId(e.target.value)}
           fullWidth required
-          helperText={candidates.length === 0 ? `No other ${tier} exists yet — assign that tier to someone first.` : undefined}
+          helperText={candidates.length === 0 ? `No other ${tier} exists yet — assign that role to someone first.` : undefined}
         >
           {candidates.map((c) => <MenuItem key={c._id} value={c._id}>{fullName(c)} ({c.employeeDetails?.employeeId || c.email})</MenuItem>)}
         </TextField>

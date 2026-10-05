@@ -121,7 +121,7 @@ const REPORT_CONFIG = {
     extractRows: (data) => data?.rows || [],
     row: (item) => ({
       title: item.name || 'Unnamed',
-      subtitle: `${item.employeeId || ''}${item.territory ? ` · ${item.territory}` : ''}`,
+      subtitle: `${item.employeeId || ''}`,
       status: item.status || (item.presentDays > 0 ? 'Active' : null)
     })
   }

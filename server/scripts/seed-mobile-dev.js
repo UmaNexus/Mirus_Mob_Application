@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import connectDB from '../config/db.js';
 import { runWithStore } from '../utils/tenantContext.js';
 import Company from '../models/Company.js';
+import { DEV_PERSONA_ROLE_NAMES, ensureJobRoleId } from './lib/devJobRoles.js';
 import User from '../models/User.js';
 import Doctor from '../models/Doctor.js';
 import DailyCallReport from '../models/DailyCallReport.js';
@@ -59,9 +60,9 @@ async function upsertCompany(slug, name) {
   return company;
 }
 
-async function upsertUser(company, { email, role, firstName, lastName, gender, dob, tier, territory, employeeId, reportingManagerId }) {
+async function upsertUser(company, { email, role, firstName, lastName, gender, dob, persona, employeeId, reportingManagerId }) {
   let user = await User.findOne({ companyId: company._id, email });
-  const fieldForce = tier ? { tier, territory: territory || null } : { tier: null, territory: null };
+  const jobRole = persona ? await ensureJobRoleId(company._id, DEV_PERSONA_ROLE_NAMES[persona]) : null;
 
   if (user) {
     user.password = DEV_PASSWORD; // re-hashed by the User pre-save hook
@@ -69,7 +70,7 @@ async function upsertUser(company, { email, role, firstName, lastName, gender, d
     user.role = role;
     user.employeeDetails = user.employeeDetails || {};
     user.employeeDetails.reportingManagerId = reportingManagerId || null;
-    user.employeeDetails.fieldForce = fieldForce;
+    user.employeeDetails.jobRole = jobRole;
     if (employeeId) user.employeeDetails.employeeId = employeeId;
     await user.save();
     mark('existing', 'User');
@@ -95,7 +96,7 @@ async function upsertUser(company, { email, role, firstName, lastName, gender, d
     employeeDetails: {
       employeeId: employeeId || undefined,
       reportingManagerId: reportingManagerId || null,
-      fieldForce
+      jobRole
     }
   });
   mark('created', 'User');
@@ -280,7 +281,7 @@ async function seedBusinessData({ companyId, bdm, bdm2, asm, rsm }) {
   // --- One manager-own field call for the ASM (fills in when no BDM is assigned) ---
   const { default: ManagerFieldCall } = await import('../models/ManagerFieldCall.js');
   await upsertDoc(ManagerFieldCall, 'ManagerFieldCall', { companyId, userId: asm._id, contactName: 'Dr. Kavita Iyer' }, () => ({
-    companyId, userId: asm._id, tier: 'ASM', area: 'Secunderabad', visitType: 'Doctor',
+    companyId, userId: asm._id, jobRoleName: DEV_PERSONA_ROLE_NAMES.ASM, area: 'Secunderabad', visitType: 'Doctor',
     contactName: 'Dr. Kavita Iyer', speciality: 'Gynaecology', productsDetailed: ['Cardivax 5mg'],
     reason: 'No BDM assigned', feedback: 'Territory currently uncovered, manager visited directly.', loggedAt: daysAgo(2)
   }));
@@ -296,27 +297,27 @@ async function run() {
   });
   const nsm = await upsertUser(company, {
     email: 'nsm@dev.test', role: 'employee', firstName: 'Nikhil', lastName: 'Nair', gender: 'Male', dob: new Date('1975-06-15'),
-    tier: 'NSM', territory: 'India', employeeId: 'DEV-NSM-001', reportingManagerId: admin._id
+    persona: 'ZSM', employeeId: 'DEV-NSM-001', reportingManagerId: admin._id
   });
   const zsm = await upsertUser(company, {
     email: 'zsm@dev.test', role: 'employee', firstName: 'Zara', lastName: 'Shaikh', gender: 'Female', dob: new Date('1979-03-22'),
-    tier: 'ZSM', territory: 'South Zone', employeeId: 'DEV-ZSM-001', reportingManagerId: nsm._id
+    persona: 'ZSM', employeeId: 'DEV-ZSM-001', reportingManagerId: nsm._id
   });
   const rsm = await upsertUser(company, {
     email: 'rsm@dev.test', role: 'employee', firstName: 'Rohit', lastName: 'Sharma', gender: 'Male', dob: new Date('1983-08-09'),
-    tier: 'RSM', territory: 'Telangana Region', employeeId: 'DEV-RSM-001', reportingManagerId: zsm._id
+    persona: 'RSM', employeeId: 'DEV-RSM-001', reportingManagerId: zsm._id
   });
   const asm = await upsertUser(company, {
     email: 'asm@dev.test', role: 'employee', firstName: 'Asha', lastName: 'Mehra', gender: 'Female', dob: new Date('1987-02-14'),
-    tier: 'ASM', territory: 'Hyderabad Area', employeeId: 'DEV-ASM-001', reportingManagerId: rsm._id
+    persona: 'ASM', employeeId: 'DEV-ASM-001', reportingManagerId: rsm._id
   });
   const bdm = await upsertUser(company, {
     email: 'bdm@dev.test', role: 'employee', firstName: 'Bharat', lastName: 'Desai', gender: 'Male', dob: new Date('1995-11-30'),
-    tier: 'BDM', territory: 'Banjara Hills - Jubilee Hills', employeeId: 'DEV-BDM-001', reportingManagerId: asm._id
+    persona: 'BDM', employeeId: 'DEV-BDM-001', reportingManagerId: asm._id
   });
   const bdm2 = await upsertUser(company, {
     email: 'bdm2@dev.test', role: 'employee', firstName: 'Bhavana', lastName: 'Reddy', gender: 'Female', dob: new Date('1996-05-18'),
-    tier: 'BDM', territory: 'Kukatpally', employeeId: 'DEV-BDM-002', reportingManagerId: asm._id
+    persona: 'BDM', employeeId: 'DEV-BDM-002', reportingManagerId: asm._id
   });
 
   await runWithStore({ companyId: String(company._id), role: 'admin', authed: true }, async () => {

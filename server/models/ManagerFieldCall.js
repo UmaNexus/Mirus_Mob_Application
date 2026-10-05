@@ -1,6 +1,5 @@
 import mongoose from 'mongoose';
 import tenantScope from './plugins/tenantScope.js';
-import { FIELD_TIERS } from '../config/fieldForce.js';
 // mirus
 const SampleGivenSchema = new mongoose.Schema({
   product: { type: String, trim: true, required: true },
@@ -16,7 +15,9 @@ const SampleGivenSchema = new mongoose.Schema({
 const ManagerFieldCallSchema = new mongoose.Schema({
   companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true }, // the manager
-  tier: { type: String, enum: FIELD_TIERS, required: true }, // snapshot at logging time
+  tier: { type: String, trim: true }, // HISTORICAL snapshot on records logged before JobRoles; read-only, never written or enforced
+
+  jobRoleName: { type: String, trim: true, default: null }, // JobRole.name snapshot at logging time
   area: { type: String, trim: true, default: '' },
   visitType: { type: String, enum: ['Doctor', 'Chemist', 'Hospital'], required: true },
   doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Doctor', default: null }, // optional link to an existing doctor

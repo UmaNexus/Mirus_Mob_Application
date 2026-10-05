@@ -1,3 +1,4 @@
+import { clearJobRoleOnUser } from './jobRoleAssignment.js';
 import crypto from 'node:crypto';
 import User from '../models/User.js';
 import { refreshOpenOfferDates } from './offerService.js';
@@ -27,7 +28,9 @@ export const restoreSoftDeletedCandidate = async (user, { fullName, joiningDate,
   if (!user.employeeDetails) user.employeeDetails = {};
   user.set('employeeDetails.employeeId', undefined);
   user.set('employeeDetails.designation', undefined);
+  clearJobRoleOnUser(user); // keep designation and role in sync when a candidate record is reset
   user.set('employeeDetails.department', undefined);
+  user.set('employeeDetails.workLocation', undefined); // a restored candidate starts clean; the new offer's Job Location is applied at approval
   if (joiningDate) user.employeeDetails.dateOfJoining = new Date(joiningDate);
 
   await user.save();

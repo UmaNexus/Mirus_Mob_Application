@@ -4,6 +4,7 @@ import {
   getUserById,
   getEmployeeOverview,
   updateUser,
+  getEligibleManagers,
   softDeleteUser,
   restoreUser,
   permanentDeleteUser,
@@ -22,6 +23,7 @@ router.use(verifyToken);
 // Read/create/update are HR+Admin; delete, restore and role-change are Admin-only
 // (role-change enforced inside updateUser). Granular RBAC per Epic R.
 router.get('/', requirePermission(PERMISSIONS.USER_READ), listUsers);
+router.get('/:id/eligible-managers', requirePermission(PERMISSIONS.USER_UPDATE), getEligibleManagers);
 router.get('/:id/overview', requirePermission(PERMISSIONS.USER_READ), getEmployeeOverview);
 router.get('/:id', requirePermission(PERMISSIONS.USER_READ), getUserById);
 router.put('/:id', requirePermission(PERMISSIONS.USER_UPDATE), updateUserRules, validate, updateUser);

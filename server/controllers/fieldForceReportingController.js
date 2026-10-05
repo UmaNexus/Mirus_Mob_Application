@@ -12,10 +12,22 @@ import User from '../models/User.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { paisaToRupees } from '../utils/money.js';
-import { FIELD_TIERS } from '../config/fieldForce.js';
+import {
+  fieldUserFilter, leafUserFilter, JOB_ROLE_POPULATE, roleOf, publicJobRole
+} from '../services/fieldIdentity.js';
 import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds, canAccessFieldOpsUser, buildReportingChainAbove, resolveJointCallParticipants } from '../middleware/fieldForceAuth.js';
 
 const dateKeyOf = (d) => new Date(d).toISOString().slice(0, 10);
+
+/**
+ * The leaf "field rep" position (JobRole.name = the BDM role). Users with no field role
+ * are simply not members — never an error.
+ */
+const findLeafMembers = async (baseFilter, select) =>
+  User.find({ $and: [baseFilter, await leafUserFilter()] })
+    .select(`${select} employeeDetails.jobRole`)
+    .populate(JOB_ROLE_POPULATE)
+    .lean();
 const todayKey = () => dateKeyOf(new Date());
 const currentMonth = () => new Date().toISOString().slice(0, 7);
 
@@ -215,7 +227,8 @@ const resolvePreviousPeriodRange = (period, currentStartKey) => {
 export const getMyReportingChain = asyncHandler(async (req, res) => {
   const chainIds = [...(await buildReportingChainAbove(req.user._id))];
   const managers = await User.find({ _id: { $in: chainIds } })
-    .select('personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce');
+    .select('personalDetails.firstName personalDetails.lastName employeeDetails.jobRole')
+    .populate(JOB_ROLE_POPULATE);
   res.status(200).json({ success: true, data: managers });
 });
 
@@ -412,7 +425,7 @@ export const getMyDashboard = asyncHandler(async (req, res) => {
 export const getMonitor = asyncHandler(async (req, res) => {
   const companyWide = hasCompanyWideFieldOpsAccess(req.user);
   let scopeFilter = {};
-  let teamMemberFilter = { 'employeeDetails.fieldForce.tier': { $ne: null } };
+  let teamMemberFilter = await fieldUserFilter();
 
   if (!companyWide) {
     const subtree = [...(await buildReportingSubtreeIds(req.user._id))];
@@ -438,8 +451,8 @@ export const getMonitor = asyncHandler(async (req, res) => {
     pendingExpense
   ] = await Promise.all([
     User.countDocuments(teamMemberFilter),
-    User.countDocuments({ ...teamMemberFilter, 'employeeDetails.fieldForce.tier': 'BDM' }),
-    User.find({ ...teamMemberFilter, 'employeeDetails.fieldForce.tier': 'BDM' }).select('_id').lean(),
+    findLeafMembers(teamMemberFilter, '_id').then((members) => members.length),
+    findLeafMembers(teamMemberFilter, '_id'),
     DailyCallReport.distinct('userId', { ...scopeFilter, dateKey: todayKey() }).then((ids) => ids.length),
     MonthlyTourPlan.countDocuments({ ...scopeFilter, month, status: 'pending' }),
     MonthlyTourPlan.countDocuments({ ...scopeFilter, month, status: 'approved' }),
@@ -490,10 +503,10 @@ export const getMonitor = asyncHandler(async (req, res) => {
  */
 export const getTeamPerformance = asyncHandler(async (req, res) => {
   const companyWide = hasCompanyWideFieldOpsAccess(req.user);
-  let teamMemberFilter = { 'employeeDetails.fieldForce.tier': 'BDM' };
+  let teamMemberFilter = {};
   if (!companyWide) {
     const subtree = [...(await buildReportingSubtreeIds(req.user._id))];
-    teamMemberFilter = { _id: { $in: subtree }, 'employeeDetails.fieldForce.tier': 'BDM' };
+    teamMemberFilter = { _id: { $in: subtree } };
   }
 
   const month = String(req.query.month || currentMonth());
@@ -503,9 +516,10 @@ export const getTeamPerformance = asyncHandler(async (req, res) => {
   const elapsedWorkingDays = workingDays.filter((d) => d <= today);
   const targetWorkingDays = elapsedWorkingDays.length > 0 ? elapsedWorkingDays : workingDays;
 
-  const bdms = await User.find(teamMemberFilter)
-    .select('personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce employeeDetails.employeeId isActive')
-    .lean();
+  const bdms = await findLeafMembers(
+    teamMemberFilter,
+    'personalDetails.firstName personalDetails.lastName employeeDetails.employeeId isActive'
+  );
 
   const data = await Promise.all(bdms.map(async (bdm) => {
     const perf = await computeBdmPerformance(bdm._id, month, targetWorkingDays);
@@ -513,7 +527,7 @@ export const getTeamPerformance = asyncHandler(async (req, res) => {
       userId: bdm._id,
       name: `${bdm.personalDetails?.firstName || ''} ${bdm.personalDetails?.lastName || ''}`.trim(),
       employeeId: bdm.employeeDetails?.employeeId || null,
-      territory: bdm.employeeDetails?.fieldForce?.territory || null,
+      roleName: roleOf(bdm).name,
       isActive: Boolean(bdm.isActive),
       ...perf
     };
@@ -543,28 +557,25 @@ export const getTeamPerformance = asyncHandler(async (req, res) => {
  * the current month regardless of the selected period, matching the
  * prototype's fixed "Monthly Summary" section.
  *
- * `tier` (optional, one of FIELD_TIERS) generalizes this beyond BDM — an
- * NSM/Admin executive screen can request `tier=ZSM`/`RSM`/`ASM`/`NSM` to see
- * that tier's attendance across the caller's *whole* subtree (flat, not just
- * direct reports). Omitting it defaults to `'BDM'`, the exact prior
- * behavior, so every existing ASM/RSM/ZSM caller (which never passes this
- * param) is unaffected. Response field names (`totalBdms`, etc.) are kept
- * as-is regardless of the requested tier for backward compatibility with
- * existing clients.
+ * `jobRoleId` (optional) selects everyone in scope holding that JobRole (an executive
+ * screen can show any role's attendance across the caller's *whole* subtree, flat). Omitting
+ * it defaults to the leaf field-rep role. Response field names (`totalBdms`, etc.) are kept
+ * as-is for backward compatibility with existing clients.
  */
 export const getTeamAttendance = asyncHandler(async (req, res) => {
   const companyWide = hasCompanyWideFieldOpsAccess(req.user);
-  const tier = FIELD_TIERS.includes(req.query.tier) ? req.query.tier : 'BDM';
-  let teamMemberFilter = { 'employeeDetails.fieldForce.tier': tier };
-  if (!companyWide) {
-    const subtree = [...(await buildReportingSubtreeIds(req.user._id))];
-    teamMemberFilter = { _id: { $in: subtree }, 'employeeDetails.fieldForce.tier': tier };
-  }
+  // Member selection: a given `jobRoleId` (company-scoped by tenantScope), else the leaf field-rep role.
+  const jobRoleId = mongoose.isValidObjectId(req.query.jobRoleId) ? String(req.query.jobRoleId) : null;
+  const scopeMemberFilter = companyWide ? {} : { _id: { $in: [...(await buildReportingSubtreeIds(req.user._id))] } };
+  const ATTENDANCE_SELECT = 'personalDetails.firstName personalDetails.lastName employeeDetails.jobRole employeeDetails.employeeId';
 
   const period = ['today', 'week', 'month'].includes(req.query.period) ? req.query.period : 'today';
-  const bdms = await User.find(teamMemberFilter)
-    .select('personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce employeeDetails.employeeId')
-    .lean();
+  let bdms;
+  if (jobRoleId) {
+    bdms = await User.find({ ...scopeMemberFilter, 'employeeDetails.jobRole': jobRoleId }).select(ATTENDANCE_SELECT).populate(JOB_ROLE_POPULATE).lean();
+  } else {
+    bdms = await findLeafMembers(scopeMemberFilter, 'personalDetails.firstName personalDetails.lastName employeeDetails.employeeId');
+  }
   const bdmIds = bdms.map((u) => u._id);
 
   const now = new Date();
@@ -609,14 +620,14 @@ export const getTeamAttendance = asyncHandler(async (req, res) => {
     const id = String(bdm._id);
     const name = `${bdm.personalDetails?.firstName || ''} ${bdm.personalDetails?.lastName || ''}`.trim();
     const employeeId = bdm.employeeDetails?.employeeId || null;
-    const territory = bdm.employeeDetails?.fieldForce?.territory || null;
+    const roleName = roleOf(bdm).name;
     const onLeaveToday = leaveUserIds.has(id);
 
     if (period === 'today') {
       const todayRecord = todayByUser.get(id);
       const punchedIn = Boolean(todayRecord?.punchInAt);
       return {
-        userId: bdm._id, name, employeeId, territory,
+        userId: bdm._id, name, employeeId, roleName,
         status: onLeaveToday ? 'leave' : punchedIn ? 'in' : 'out',
         punchInAt: todayRecord?.punchInAt || null,
         punchOutAt: todayRecord?.punchOutAt || null
@@ -628,7 +639,7 @@ export const getTeamAttendance = asyncHandler(async (req, res) => {
       periodRecords.filter((r) => r.status === 'Present' || r.punchInAt).map((r) => r.dateKey)
     ).size;
     return {
-      userId: bdm._id, name, employeeId, territory,
+      userId: bdm._id, name, employeeId, roleName,
       status: onLeaveToday ? 'leave' : null,
       presentDays,
       workingDays: workingDaysInRange.length
@@ -687,14 +698,14 @@ export const getTeamAttendance = asyncHandler(async (req, res) => {
     onApprovedLeave
   };
 
-  res.status(200).json({ success: true, period, tier, summary, rows, monthlySummary });
+  res.status(200).json({ success: true, period, jobRoleId, summary, rows, monthlySummary });
 });
 
 /**
  * GET /api/field-force/org-summary?month=YYYY-MM — NSM/Admin executive Home
  * screen. Scoped identically to `getMonitor` (own reporting subtree, or
  * company-wide for admin/superadmin), but additionally breaks the scope down
- * by tier (`tierCounts`) and adds attendance-today + doctor-coverage figures
+ * by JobRole (`roleCounts`) and adds attendance-today + doctor-coverage figures
  * that a plain ASM/RSM/ZSM "my BDMs" monitor screen has no use for. Every
  * figure is computed live — nothing here is hardcoded.
  */
@@ -704,7 +715,7 @@ export const getOrgSummary = asyncHandler(async (req, res) => {
 
   let allMemberIds;
   if (companyWide) {
-    allMemberIds = (await User.find({ 'employeeDetails.fieldForce.tier': { $ne: null } }).select('_id').lean()).map((u) => String(u._id));
+    allMemberIds = (await User.find(await fieldUserFilter()).select('_id').lean()).map((u) => String(u._id));
   } else {
     allMemberIds = [...(await buildReportingSubtreeIds(req.user._id))];
   }
@@ -719,14 +730,22 @@ export const getOrgSummary = asyncHandler(async (req, res) => {
   const memberFilter = { _id: { $in: allMemberIds } };
   const scopeFilter = { userId: { $in: allMemberIds } };
 
-  const tierCountsAgg = await User.aggregate([
-    { $match: { _id: { $in: allMemberIds.map((id) => new mongoose.Types.ObjectId(id)) } } },
-    { $group: { _id: '$employeeDetails.fieldForce.tier', count: { $sum: 1 } } }
-  ]);
-  const tierCounts = {};
-  tierCountsAgg.forEach((row) => { if (row._id) tierCounts[row._id] = row.count; });
+  // Role breakdown by JobRole (name resolved server-side). A user with no valid field role
+  // is simply not counted.
+  const roleMembers = await User.find({ $and: [memberFilter, await fieldUserFilter()] })
+    .select('employeeDetails.jobRole')
+    .populate(JOB_ROLE_POPULATE)
+    .lean();
+  const roleCountMap = new Map();
+  roleMembers.forEach((u) => {
+    const r = roleOf(u);
+    const entry = roleCountMap.get(r.jobRoleId) || { jobRoleId: r.jobRoleId, name: r.name, code: r.code, count: 0 };
+    entry.count += 1;
+    roleCountMap.set(r.jobRoleId, entry);
+  });
+  const roleCounts = [...roleCountMap.values()].sort((x, y) => String(x.name).localeCompare(String(y.name)));
 
-  const bdmIds = (await User.find({ ...memberFilter, 'employeeDetails.fieldForce.tier': 'BDM' }).select('_id').lean()).map((u) => u._id);
+  const bdmIds = roleMembers.filter((u) => roleOf(u).isLeaf).map((u) => u._id);
 
   const todayStart = new Date(`${today}T00:00:00.000Z`);
   const todayEnd = new Date(`${today}T23:59:59.999Z`);
@@ -755,7 +774,7 @@ export const getOrgSummary = asyncHandler(async (req, res) => {
     success: true,
     data: {
       scope,
-      tierCounts,
+      roleCounts,
       attendanceToday: { punchedIn, notIn, onLeave, total },
       dcrRate,
       mtpAdherence,
@@ -769,7 +788,7 @@ export const getOrgSummary = asyncHandler(async (req, res) => {
 });
 
 /**
- * GET /api/field-force/tier-directory?tier=&managerId=&month= — the
+ * GET /api/field-force/tier-directory?jobRoleId=&managerId=&month= — the
  * NSM/Admin executive Monitor tab's drill-down. Returns exactly one level of
  * the hierarchy at a time (a manager's DIRECT reports only — never the whole
  * subtree flattened), so the client can drill ZSM -> RSM -> ASM -> BDM (NSM)
@@ -780,7 +799,8 @@ export const getOrgSummary = asyncHandler(async (req, res) => {
  * into a manager outside its own subtree by guessing an id.
  */
 export const getTierDirectory = asyncHandler(async (req, res) => {
-  const { tier, managerId } = req.query;
+  const { managerId } = req.query;
+  const jobRoleIdFilter = mongoose.isValidObjectId(req.query.jobRoleId) ? String(req.query.jobRoleId) : null;
   if (managerId && !mongoose.isValidObjectId(managerId)) throw new ApiError(400, 'Invalid managerId');
 
   const month = String(req.query.month || currentMonth());
@@ -790,54 +810,54 @@ export const getTierDirectory = asyncHandler(async (req, res) => {
   const elapsedWorkingDays = workingDays.filter((d) => d <= today);
   const targetWorkingDays = elapsedWorkingDays.length > 0 ? elapsedWorkingDays : workingDays;
 
-  const DIRECTORY_SELECT = 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce employeeDetails.employeeId isActive';
+  const DIRECTORY_SELECT = 'personalDetails.firstName personalDetails.lastName employeeDetails.jobRole employeeDetails.employeeId isActive';
   let directReports;
 
   if (managerId) {
     if (!(await canAccessFieldOpsUser(req.user, managerId))) {
       throw new ApiError(403, 'You are not authorized to view this manager\'s team');
     }
-    directReports = await User.find({ 'employeeDetails.reportingManagerId': managerId, deletedAt: null }).select(DIRECTORY_SELECT).lean();
+    directReports = await User.find({ 'employeeDetails.reportingManagerId': managerId, deletedAt: null }).select(DIRECTORY_SELECT).populate(JOB_ROLE_POPULATE).lean();
   } else if (hasCompanyWideFieldOpsAccess(req.user)) {
     // Admin/superadmin with no managerId: the very top of the org — every
     // user reporting directly to an Admin/superadmin (i.e. every NSM, or a
     // manager onboarded directly under Admin).
     const admins = await User.find({ role: { $in: ['admin', 'superadmin'] } }).select('_id').lean();
     const adminIds = admins.map((a) => a._id);
-    directReports = await User.find({ 'employeeDetails.reportingManagerId': { $in: adminIds }, deletedAt: null }).select(DIRECTORY_SELECT).lean();
+    directReports = await User.find({ 'employeeDetails.reportingManagerId': { $in: adminIds }, deletedAt: null }).select(DIRECTORY_SELECT).populate(JOB_ROLE_POPULATE).lean();
   } else {
-    // NSM (or any tiered manager) with no managerId: their own direct reports.
-    directReports = await User.find({ 'employeeDetails.reportingManagerId': req.user._id, deletedAt: null }).select(DIRECTORY_SELECT).lean();
+    // A manager-role caller with no managerId: their own direct reports.
+    directReports = await User.find({ 'employeeDetails.reportingManagerId': req.user._id, deletedAt: null }).select(DIRECTORY_SELECT).populate(JOB_ROLE_POPULATE).lean();
   }
 
-  if (tier) {
-    directReports = directReports.filter((u) => u.employeeDetails?.fieldForce?.tier === tier);
+  if (jobRoleIdFilter) {
+    directReports = directReports.filter((u) => roleOf(u).jobRoleId === jobRoleIdFilter);
   }
 
   const data = await Promise.all(directReports.map(async (u) => {
-    const rowTier = u.employeeDetails?.fieldForce?.tier || null;
+    const role = roleOf(u);
     const base = {
       userId: u._id,
       name: `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim(),
       employeeId: u.employeeDetails?.employeeId || null,
-      territory: u.employeeDetails?.fieldForce?.territory || null,
-      tier: rowTier,
+      jobRole: publicJobRole(u),
+      roleName: role.name,
       isActive: Boolean(u.isActive)
     };
 
-    if (rowTier === 'BDM') {
+    if (role.isLeaf) {
       const perf = await computeBdmPerformance(u._id, month, targetWorkingDays);
       return { ...base, ...perf };
     }
 
-    if (rowTier) {
+    if (role.isManager) {
       const [directReportCount, childSubtree] = await Promise.all([
         User.countDocuments({ 'employeeDetails.reportingManagerId': u._id, deletedAt: null }),
         buildReportingSubtreeIds(u._id)
       ]);
       const childIds = [...childSubtree];
       const childBdmIds = childIds.length
-        ? (await User.find({ _id: { $in: childIds }, 'employeeDetails.fieldForce.tier': 'BDM' }).select('_id').lean()).map((x) => x._id)
+        ? (await findLeafMembers({ _id: { $in: childIds } }, '_id')).map((x) => x._id)
         : [];
       const childScopeFilter = { userId: { $in: childIds } };
       const [dcrRate, mtpAdherence] = await Promise.all([
@@ -871,7 +891,7 @@ export const getReportsSummary = asyncHandler(async (req, res) => {
     scopeFilter = { userId: { $in: subtree } };
     scopeMemberIds = subtree;
   } else {
-    scopeMemberIds = (await User.find({ 'employeeDetails.fieldForce.tier': { $ne: null } }).select('_id').lean()).map((u) => String(u._id));
+    scopeMemberIds = (await User.find(await fieldUserFilter()).select('_id').lean()).map((u) => String(u._id));
   }
 
   const period = ['today', 'week', 'month', 'quarter', 'ytd'].includes(req.query.period) ? req.query.period : 'month';

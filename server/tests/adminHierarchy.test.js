@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import request from 'supertest';
 import * as db from './helpers/testDb.js';
 import app from '../app.js';
-import { authAgent, createUser, createCompany, getDefaultCompany } from './helpers/factories.js';
+import { authAgent, createUser, createCompany, getDefaultCompany, getOrCreateJobRole } from './helpers/factories.js';
 import User from '../models/User.js';
 import Doctor from '../models/Doctor.js';
 import DailyCallReport from '../models/DailyCallReport.js';
@@ -25,11 +25,11 @@ const buildFullChain = async () => {
   n += 1;
   const company = await getDefaultCompany();
   const { agent: adminAgent, user: admin } = await authAgent(app, { company, email: `admin_${n}@xyz.com`, role: 'admin' });
-  const nsm = await createUser({ companyId: company._id, email: `nsm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'NSM' }, reportingManagerId: admin._id } });
-  const zsm = await createUser({ companyId: company._id, email: `zsm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ZSM' }, reportingManagerId: nsm._id } });
-  const rsm = await createUser({ companyId: company._id, email: `rsm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'RSM' }, reportingManagerId: zsm._id } });
-  const asm = await createUser({ companyId: company._id, email: `asm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ASM' }, reportingManagerId: rsm._id } });
-  const bdm = await createUser({ companyId: company._id, email: `bdm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id } });
+  const nsm = await createUser({ companyId: company._id, email: `nsm_${n}@xyz.com`, employeeDetails: { fieldRole: 'NSM', reportingManagerId: admin._id } });
+  const zsm = await createUser({ companyId: company._id, email: `zsm_${n}@xyz.com`, employeeDetails: { fieldRole: 'ZSM', reportingManagerId: nsm._id } });
+  const rsm = await createUser({ companyId: company._id, email: `rsm_${n}@xyz.com`, employeeDetails: { fieldRole: 'RSM', reportingManagerId: zsm._id } });
+  const asm = await createUser({ companyId: company._id, email: `asm_${n}@xyz.com`, employeeDetails: { fieldRole: 'ASM', reportingManagerId: rsm._id } });
+  const bdm = await createUser({ companyId: company._id, email: `bdm_${n}@xyz.com`, employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id } });
 
   const [nsmAgent, zsmAgent, rsmAgent, asmAgent, bdmAgent] = await Promise.all([
     loginAs(company, nsm), loginAs(company, zsm), loginAs(company, rsm), loginAs(company, asm), loginAs(company, bdm)
@@ -76,36 +76,41 @@ test('Non-admin cannot read or modify the hierarchy', async () => {
 
 // ---------- 3/5. Valid role + reporting-manager assignment ----------
 
-test('Valid role (tier) assignment works', async () => {
-  const { adminAgent, rsm } = await buildFullChain();
-  const target = await createUser({ email: `new-asm-${Date.now()}@xyz.com`, employeeDetails: { reportingManagerId: rsm._id } });
-  const res = await adminAgent.put(`/api/users/${target._id}`).send({ fieldForceTier: 'ASM' });
+test('Valid role (JobRole) assignment syncs designation with the JobRole and leaves the HRMS role untouched', async () => {
+  const { adminAgent, rsm, company } = await buildFullChain();
+  const target = await createUser({ email: `new-asm-${Date.now()}@xyz.com`, employeeDetails: { reportingManagerId: rsm._id, designation: 'Keep Me' } });
+  const role = await getOrCreateJobRole(company._id, 'Area sales manager');
+  const res = await adminAgent.put(`/api/users/${target._id}`).send({ jobRoleId: String(role._id) });
   assert.equal(res.status, 200);
-  assert.equal(res.body.user.employeeDetails.fieldForce.tier, 'ASM');
+  assert.equal(res.body.user.employeeDetails.jobRole.name, 'Area sales manager');
+  assert.equal(res.body.user.employeeDetails.designation, 'Area sales manager', 'designation = JobRole.name');
+  assert.equal(res.body.user.role, 'employee');
 });
 
 test('Valid reporting-manager assignment works', async () => {
   const { adminAgent, rsm } = await buildFullChain();
-  const target = await createUser({ email: `new-asm2-${Date.now()}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const target = await createUser({ email: `new-asm2-${Date.now()}@xyz.com`, employeeDetails: { fieldRole: 'ASM' } });
   const res = await adminAgent.put(`/api/users/${target._id}`).send({ reportingManagerId: String(rsm._id) });
   assert.equal(res.status, 200);
   assert.equal(String(res.body.user.employeeDetails.reportingManagerId), String(rsm._id));
 });
 
-// ---------- 4. Invalid role hierarchy rejected ----------
+// ---------- 4. reportingManagerId is the only hierarchy (no role ladder) ----------
 
-test('Invalid reporting-hierarchy depth is rejected — a BDM cannot report directly to an RSM, skipping ASM', async () => {
-  const { adminAgent, rsm } = await buildFullChain();
-  const target = await createUser({ email: `bad-depth-${Date.now()}@xyz.com`, employeeDetails: { fieldForce: { tier: 'BDM' } } });
-  const res = await adminAgent.put(`/api/users/${target._id}`).send({ reportingManagerId: String(rsm._id) });
+test('A reporting manager must be an admin or hold a JobRole', async () => {
+  const { adminAgent } = await buildFullChain();
+  const plain = await createUser({ email: `plain-mgr-${Date.now()}@xyz.com` });
+  const target = await createUser({ email: `needs-mgr-${Date.now()}@xyz.com`, employeeDetails: { fieldRole: 'BDM' } });
+  const res = await adminAgent.put(`/api/users/${target._id}`).send({ reportingManagerId: String(plain._id) });
   assert.equal(res.status, 400);
 });
 
-test('An NSM must report to an Admin, not another field-force tier', async () => {
-  const { adminAgent, zsm } = await buildFullChain();
-  const target = await createUser({ email: `bad-nsm-${Date.now()}@xyz.com`, employeeDetails: { fieldForce: { tier: 'NSM' } } });
-  const res = await adminAgent.put(`/api/users/${target._id}`).send({ reportingManagerId: String(zsm._id) });
+test('The hierarchy is enforced: a BDM cannot report directly to an RSM, skipping the ASM level', async () => {
+  const { adminAgent, rsm } = await buildFullChain();
+  const target = await createUser({ email: `flat-${Date.now()}@xyz.com`, employeeDetails: { fieldRole: 'BDM' } });
+  const res = await adminAgent.put(`/api/users/${target._id}`).send({ reportingManagerId: String(rsm._id) });
   assert.equal(res.status, 400);
+  assert.match(res.body.message, /BDM must report to an ASM/);
 });
 
 // ---------- 6. Invalid reporting-manager assignment rejected ----------
@@ -127,7 +132,7 @@ test('A non-existent reporting-manager id is rejected', async () => {
 test('Cross-tenant reporting-manager assignment is rejected', async () => {
   const { adminAgent, asm } = await buildFullChain();
   const companyB = await createCompany({ slug: `hier-cross-tenant-${n}` });
-  const foreignRsm = await createUser({ companyId: companyB._id, email: `foreign-rsm-${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'RSM' } } });
+  const foreignRsm = await createUser({ companyId: companyB._id, email: `foreign-rsm-${n}@xyz.com`, employeeDetails: { fieldRole: 'RSM' } });
 
   const res = await adminAgent.put(`/api/users/${asm._id}`).send({ reportingManagerId: String(foreignRsm._id) });
   assert.equal(res.status, 400);
@@ -151,7 +156,7 @@ test('A deeper circular relationship (RSM -> their own grandchild BDM) is reject
 
 test('Replacing an ASM preserves all of its BDM descendants', async () => {
   const { adminAgent, rsm, asm, bdm } = await buildFullChain();
-  const newAsm = await createUser({ companyId: rsm.companyId, email: `new-asm-repl-${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ASM' }, reportingManagerId: rsm._id } });
+  const newAsm = await createUser({ companyId: rsm.companyId, email: `new-asm-repl-${n}@xyz.com`, employeeDetails: { fieldRole: 'ASM', reportingManagerId: rsm._id } });
 
   const res = await adminAgent.post('/api/admin/hierarchy/replace-manager').send({ oldManagerId: asm._id, newManagerId: newAsm._id });
   assert.equal(res.status, 200);
@@ -163,7 +168,7 @@ test('Replacing an ASM preserves all of its BDM descendants', async () => {
 
 test('Replacing an RSM preserves its whole ASM -> BDM subtree (BDM stays under the same ASM)', async () => {
   const { adminAgent, zsm, rsm, asm, bdm } = await buildFullChain();
-  const newRsm = await createUser({ companyId: zsm.companyId, email: `new-rsm-repl-${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'RSM' }, reportingManagerId: zsm._id } });
+  const newRsm = await createUser({ companyId: zsm.companyId, email: `new-rsm-repl-${n}@xyz.com`, employeeDetails: { fieldRole: 'RSM', reportingManagerId: zsm._id } });
 
   const res = await adminAgent.post('/api/admin/hierarchy/replace-manager').send({ oldManagerId: rsm._id, newManagerId: newRsm._id });
   assert.equal(res.status, 200);
@@ -177,7 +182,7 @@ test('Replacing an RSM preserves its whole ASM -> BDM subtree (BDM stays under t
 
 test('Replacing a ZSM preserves its whole RSM -> ASM -> BDM subtree', async () => {
   const { adminAgent, nsm, zsm, rsm, asm, bdm } = await buildFullChain();
-  const newZsm = await createUser({ companyId: nsm.companyId, email: `new-zsm-repl-${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ZSM' }, reportingManagerId: nsm._id } });
+  const newZsm = await createUser({ companyId: nsm.companyId, email: `new-zsm-repl-${n}@xyz.com`, employeeDetails: { fieldRole: 'ZSM', reportingManagerId: nsm._id } });
 
   const res = await adminAgent.post('/api/admin/hierarchy/replace-manager').send({ oldManagerId: zsm._id, newManagerId: newZsm._id });
   assert.equal(res.status, 200);
@@ -191,10 +196,10 @@ test('Replacing a ZSM preserves its whole RSM -> ASM -> BDM subtree', async () =
   assert.equal(String(reloadedBdm.employeeDetails.reportingManagerId), String(asm._id), 'BDM untouched — still reports to the same ASM');
 });
 
-test('Replacement requires the same tier, rejects mismatched tier and non-manager tiers', async () => {
+test('Replacement requires the same JobRole, rejects a mismatched role and a non-manager position', async () => {
   const { adminAgent, rsm, asm, bdm } = await buildFullChain();
 
-  // Wrong tier (BDM instead of ASM).
+  // Wrong role (BDM instead of ASM).
   const mismatch = await adminAgent.post('/api/admin/hierarchy/replace-manager').send({ oldManagerId: asm._id, newManagerId: bdm._id });
   assert.equal(mismatch.status, 400);
 
@@ -205,8 +210,8 @@ test('Replacement requires the same tier, rejects mismatched tier and non-manage
 
 test('Replacing a manager with one of their own descendants is rejected', async () => {
   const { adminAgent, rsm, asm, bdm } = await buildFullChain();
-  // Promote the BDM to ASM tier first so the tier check alone wouldn't block this.
-  await User.updateOne({ _id: bdm._id }, { $set: { 'employeeDetails.fieldForce.tier': 'ASM' } });
+  // Give the BDM the ASM's JobRole first so the same-role check alone wouldn't block this.
+  await User.updateOne({ _id: bdm._id }, { $set: { 'employeeDetails.jobRole': asm.employeeDetails.jobRole } });
   const res = await adminAgent.post('/api/admin/hierarchy/replace-manager').send({ oldManagerId: asm._id, newManagerId: bdm._id });
   assert.equal(res.status, 400);
 });
@@ -221,7 +226,7 @@ test('Existing doctor/DCR ownership data is unchanged after a manager replacemen
   const dcrRes = await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId });
   assert.equal(dcrRes.status, 201);
 
-  const newAsm = await createUser({ companyId: rsm.companyId, email: `new-asm-data-${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ASM' }, reportingManagerId: rsm._id } });
+  const newAsm = await createUser({ companyId: rsm.companyId, email: `new-asm-data-${n}@xyz.com`, employeeDetails: { fieldRole: 'ASM', reportingManagerId: rsm._id } });
   const replaceRes = await adminAgent.post('/api/admin/hierarchy/replace-manager').send({ oldManagerId: asm._id, newManagerId: newAsm._id });
   assert.equal(replaceRes.status, 200);
 
@@ -240,7 +245,7 @@ test('Manager authorization immediately follows the new hierarchy after a replac
   const doctorRes = await asmAgent.post('/api/doctors').send({ name: 'Dr. Auth Test', assignedTo: String(bdm._id) });
   await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId: doctorRes.body.doctor._id });
 
-  const newAsm = await createUser({ companyId: rsm.companyId, email: `new-asm-auth-${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ASM' }, reportingManagerId: rsm._id } });
+  const newAsm = await createUser({ companyId: rsm.companyId, email: `new-asm-auth-${n}@xyz.com`, employeeDetails: { fieldRole: 'ASM', reportingManagerId: rsm._id } });
   const newAsmAgent = await loginAs(company, newAsm);
 
   const replaceRes = await adminAgent.post('/api/admin/hierarchy/replace-manager').send({ oldManagerId: asm._id, newManagerId: newAsm._id });
@@ -257,7 +262,7 @@ test('Manager authorization immediately follows the new hierarchy after a replac
   assert.equal(oldAsmView.body.data.length, 0);
 });
 
-// ---------- Newly onboarded employees (null fieldForce.tier / reportingManagerId) ----------
+// ---------- Newly onboarded employees (no jobRole / reportingManagerId) ----------
 
 /** Mirrors a real post-onboarding HRMS employee: provisioned (real employeeId, active), but never opted into the field-force hierarchy. */
 const createOnboardedEmployee = (overrides = {}) => createUser({
@@ -267,7 +272,7 @@ const createOnboardedEmployee = (overrides = {}) => createUser({
   ...overrides
 });
 
-test('A newly onboarded Sales employee with null fieldForce is returned to Admin, in the unassigned bucket', async () => {
+test('A newly onboarded Sales employee with no jobRole is returned to Admin, in the unassigned bucket', async () => {
   const { adminAgent } = await buildFullChain();
   const pending = await createOnboardedEmployee();
 
@@ -275,10 +280,11 @@ test('A newly onboarded Sales employee with null fieldForce is returned to Admin
   assert.equal(res.status, 200);
 
   const found = res.body.data.unassigned.find((u) => String(u._id) === String(pending._id));
-  assert.ok(found, 'onboarded employee with null tier/manager appears in unassigned');
+  assert.ok(found, 'onboarded employee with no role/manager appears in unassigned');
   assert.equal(found.employeeDetails.department, 'Sales');
   assert.equal(found.employeeDetails.designation, 'Regional development manager');
-  assert.equal(found.employeeDetails.fieldForce?.tier ?? null, null);
+  assert.equal(found.employeeDetails.jobRole ?? null, null);
+  assert.equal(found.employeeDetails.fieldForce, undefined, 'no fieldForce attribute exists any more');
   assert.equal(found.employeeDetails.reportingManagerId ?? null, null);
 
   // Never silently placed in the tree or flagged as a broken chain — they
@@ -290,40 +296,43 @@ test('A newly onboarded Sales employee with null fieldForce is returned to Admin
   assert.equal(inTree, false);
 });
 
-test('A user with null tier can be assigned a valid field-force tier', async () => {
-  const { adminAgent, asm } = await buildFullChain();
+test('A user with no jobRole can be assigned a JobRole and a manager together', async () => {
+  const { adminAgent, asm, company } = await buildFullChain();
   const pending = await createOnboardedEmployee();
+  const bdmRole = await getOrCreateJobRole(company._id, 'Business development manager');
 
-  const res = await adminAgent.put(`/api/users/${pending._id}`).send({ fieldForceTier: 'BDM', reportingManagerId: String(asm._id) });
+  const res = await adminAgent.put(`/api/users/${pending._id}`).send({ jobRoleId: String(bdmRole._id), reportingManagerId: String(asm._id) });
   assert.equal(res.status, 200);
-  assert.equal(res.body.user.employeeDetails.fieldForce.tier, 'BDM');
+  assert.equal(res.body.user.employeeDetails.jobRole.name, 'Business development manager');
 });
 
 test('A user with null reportingManagerId can be assigned a valid manager', async () => {
   const { adminAgent, rsm } = await buildFullChain();
-  const pending = await createOnboardedEmployee({ employeeDetails: { employeeId: `MMS${Math.floor(Math.random() * 100000)}`, fieldForce: { tier: 'ASM' } } });
+  const pending = await createOnboardedEmployee({ employeeDetails: { employeeId: `MMS${Math.floor(Math.random() * 100000)}`, fieldRole: 'ASM' } });
 
   const res = await adminAgent.put(`/api/users/${pending._id}`).send({ reportingManagerId: String(rsm._id) });
   assert.equal(res.status, 200);
   assert.equal(String(res.body.user.employeeDetails.reportingManagerId), String(rsm._id));
 });
 
-test('An invalid tier -> manager combination for a newly onboarded employee is rejected', async () => {
-  const { adminAgent, rsm } = await buildFullChain();
+test('An inactive or other-company JobRole cannot be assigned to a newly onboarded employee', async () => {
+  const { adminAgent, company } = await buildFullChain();
   const pending = await createOnboardedEmployee();
+  const inactive = await getOrCreateJobRole(company._id, 'Retired role', { active: false });
+  const companyB = await createCompany({ slug: `role-cross-tenant-${n}` });
+  const foreign = await getOrCreateJobRole(companyB._id, 'Business development manager');
 
-  // BDM must report to an ASM, not an RSM — skipping a level.
-  const res = await adminAgent.put(`/api/users/${pending._id}`).send({ fieldForceTier: 'BDM', reportingManagerId: String(rsm._id) });
-  assert.equal(res.status, 400);
+  assert.equal((await adminAgent.put(`/api/users/${pending._id}`).send({ jobRoleId: String(inactive._id) })).status, 400);
+  assert.equal((await adminAgent.put(`/api/users/${pending._id}`).send({ jobRoleId: String(foreign._id) })).status, 400);
 });
 
 test('Cross-company manager assignment for a newly onboarded employee is rejected', async () => {
   const { adminAgent } = await buildFullChain();
   const pending = await createOnboardedEmployee();
   const companyB = await createCompany({ slug: `onboard-cross-tenant-${n}` });
-  const foreignAsm = await createUser({ companyId: companyB._id, email: `foreign-asm-${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const foreignAsm = await createUser({ companyId: companyB._id, email: `foreign-asm-${n}@xyz.com`, employeeDetails: { fieldRole: 'ASM' } });
 
-  const res = await adminAgent.put(`/api/users/${pending._id}`).send({ fieldForceTier: 'BDM', reportingManagerId: String(foreignAsm._id) });
+  const res = await adminAgent.put(`/api/users/${pending._id}`).send({ reportingManagerId: String(foreignAsm._id) });
   assert.equal(res.status, 400);
 });
 
@@ -346,7 +355,8 @@ test('After assignment, the newly onboarded user appears in the correct hierarch
   const { company, adminAgent, asm, asmAgent } = await buildFullChain();
   const pending = await createOnboardedEmployee();
 
-  const assignRes = await adminAgent.put(`/api/users/${pending._id}`).send({ fieldForceTier: 'BDM', reportingManagerId: String(asm._id), fieldForceTerritory: 'Nagpur' });
+  const bdmRole = await getOrCreateJobRole(company._id, 'Business development manager');
+  const assignRes = await adminAgent.put(`/api/users/${pending._id}`).send({ jobRoleId: String(bdmRole._id), reportingManagerId: String(asm._id) });
   assert.equal(assignRes.status, 200);
 
   const hierarchyRes = await adminAgent.get('/api/admin/hierarchy');
@@ -356,7 +366,7 @@ test('After assignment, the newly onboarded user appears in the correct hierarch
   };
   const attached = hierarchyRes.body.data.roots.reduce((found, root) => found || findUnderAsm(root), null);
   assert.ok(attached, 'newly assigned user is now attached under their ASM in the tree');
-  assert.equal(attached.employeeDetails.fieldForce.territory, 'Nagpur');
+  assert.equal(attached.roleName, 'Business development manager');
 
   // Manager authorization immediately follows the new hierarchy — no
   // separate "activate" step needed.
@@ -370,152 +380,28 @@ test('After assignment, the newly onboarded user appears in the correct hierarch
   assert.equal(asmView.body.data.length, 1);
 });
 
-// ---------- Hierarchy-integrity bug: tier change must not silently orphan existing direct reports ----------
+// ---------- Changing a role never reshuffles the reporting graph ----------
 
-// NOTE: promoting `asm` (ASM) to RSM also invalidates asm's OWN existing
-// manager relationship (their old manager `rsm` is tier RSM, but an RSM
-// itself must report to a ZSM) — a second, independent consequence of the
-// SAME tier change, alongside the downstream BDM issue these tests target.
-// Every test below that promotes asm to RSM therefore also supplies a valid
-// new `reportingManagerId` (`zsm`, already tier ZSM in the fixture) so that
-// separate, already-covered check ("Changing tier ... would invalidate this
-// user's own current reporting manager") never masks the specific
-// downstream-reassignment behavior being tested here.
-
-test('ASM promoted to RSM with a BDM direct report is detected as an affected relationship, and nothing is committed', async () => {
-  const { adminAgent, zsm, asm, bdm } = await buildFullChain();
-
-  const res = await adminAgent.put(`/api/users/${asm._id}`).send({ fieldForceTier: 'RSM', reportingManagerId: String(zsm._id) });
-  assert.equal(res.status, 409);
-  assert.equal(res.body.details.affected.length, 1);
-  assert.equal(res.body.details.affected[0].id, String(bdm._id));
-  assert.equal(res.body.details.affected[0].tier, 'BDM');
-  assert.equal(res.body.details.affected[0].requiredManagerTier, 'ASM');
-
-  // Invalid BDM -> RSM relationship must never be committed — both records
-  // are exactly as they were before the attempted change.
-  const reloadedAsm = await User.findById(asm._id);
-  assert.equal(reloadedAsm.employeeDetails.fieldForce.tier, 'ASM');
-  const reloadedBdm = await User.findById(bdm._id);
-  assert.equal(String(reloadedBdm.employeeDetails.reportingManagerId), String(asm._id));
-});
-
-test('Admin can reassign the affected BDM to another valid ASM in the same request that changes the tier', async () => {
-  const { adminAgent, zsm, rsm, asm, bdm } = await buildFullChain();
-  const newAsm = await createUser({ companyId: rsm.companyId, email: `new-asm-cascade-${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ASM' }, reportingManagerId: rsm._id } });
-
-  const res = await adminAgent.put(`/api/users/${asm._id}`).send({
-    fieldForceTier: 'RSM',
-    reportingManagerId: String(zsm._id),
-    reassignments: [{ userId: String(bdm._id), reportingManagerId: String(newAsm._id) }]
-  });
+test('Changing a manager\'s JobRole leaves their direct reports, designation and HRMS role exactly as they were', async () => {
+  const { adminAgent, asm, bdm, company } = await buildFullChain();
+  const rsmRole = await getOrCreateJobRole(company._id, 'Regional business manager');
+  const before = await User.findById(asm._id).lean();
+  const res = await adminAgent.put(`/api/users/${asm._id}`).send({ jobRoleId: String(rsmRole._id) });
   assert.equal(res.status, 200);
-  assert.equal(res.body.reassignedCount, 1);
-
-  const reloadedAsm = await User.findById(asm._id);
-  assert.equal(reloadedAsm.employeeDetails.fieldForce.tier, 'RSM');
-  assert.equal(String(reloadedAsm.employeeDetails.reportingManagerId), String(zsm._id));
-  const reloadedBdm = await User.findById(bdm._id);
-  assert.equal(String(reloadedBdm.employeeDetails.reportingManagerId), String(newAsm._id));
+  assert.equal(res.body.user.employeeDetails.jobRole.name, 'Regional business manager');
+  const after = await User.findById(asm._id).lean();
+  assert.equal(String(after.employeeDetails.reportingManagerId), String(before.employeeDetails.reportingManagerId));
+  assert.equal(after.role, before.role);
+  assert.equal(String((await User.findById(bdm._id)).employeeDetails.reportingManagerId), String(asm._id));
 });
 
-test('An RSM promoted to ZSM only flags their direct-report ASM as affected — the ASM\'s own BDM grandchild is untouched (only direct reports, not the whole subtree, are re-validated)', async () => {
-  const { adminAgent, nsm, zsm, rsm, asm, bdm } = await buildFullChain();
-
-  const preview = await adminAgent.put(`/api/users/${rsm._id}`).send({ fieldForceTier: 'ZSM', reportingManagerId: String(nsm._id) });
-  assert.equal(preview.status, 409);
-  assert.equal(preview.body.details.affected.length, 1);
-  assert.equal(preview.body.details.affected[0].id, String(asm._id));
-
-  const newRsm = await createUser({ companyId: zsm.companyId, email: `new-rsm-cascade-${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'RSM' }, reportingManagerId: zsm._id } });
-  const commit = await adminAgent.put(`/api/users/${rsm._id}`).send({
-    fieldForceTier: 'ZSM',
-    reportingManagerId: String(nsm._id),
-    reassignments: [{ userId: String(asm._id), reportingManagerId: String(newRsm._id) }]
-  });
-  assert.equal(commit.status, 200);
-
-  const reloadedAsm = await User.findById(asm._id);
-  assert.equal(String(reloadedAsm.employeeDetails.reportingManagerId), String(newRsm._id));
-  const reloadedBdm = await User.findById(bdm._id);
-  assert.equal(String(reloadedBdm.employeeDetails.reportingManagerId), String(asm._id), 'BDM grandchild untouched — still reports to the same ASM');
-});
-
-test('A reassignment pointing at an invalid manager (wrong tier) is rejected, and nothing is committed', async () => {
-  const { adminAgent, zsm, rsm, asm, bdm } = await buildFullChain();
-  // rsm is tier RSM, not ASM — an invalid replacement manager for the BDM.
-  const res = await adminAgent.put(`/api/users/${asm._id}`).send({
-    fieldForceTier: 'RSM',
-    reportingManagerId: String(zsm._id),
-    reassignments: [{ userId: String(bdm._id), reportingManagerId: String(rsm._id) }]
-  });
-  assert.equal(res.status, 400);
-
-  const reloadedAsm = await User.findById(asm._id);
-  assert.equal(reloadedAsm.employeeDetails.fieldForce.tier, 'ASM', 'tier change never committed');
-  const reloadedBdm = await User.findById(bdm._id);
-  assert.equal(String(reloadedBdm.employeeDetails.reportingManagerId), String(asm._id), 'BDM reassignment never committed');
-});
-
-test('A reassignment pointing at a non-existent manager fails atomically — the tier change is never partially applied', async () => {
-  const { adminAgent, zsm, asm, bdm } = await buildFullChain();
-  const res = await adminAgent.put(`/api/users/${asm._id}`).send({
-    fieldForceTier: 'RSM',
-    reportingManagerId: String(zsm._id),
-    reassignments: [{ userId: String(bdm._id), reportingManagerId: '000000000000000000000000' }]
-  });
-  assert.equal(res.status, 400);
-
-  const reloadedAsm = await User.findById(asm._id);
-  assert.equal(reloadedAsm.employeeDetails.fieldForce.tier, 'ASM');
-  const reloadedBdm = await User.findById(bdm._id);
-  assert.equal(String(reloadedBdm.employeeDetails.reportingManagerId), String(asm._id));
-});
-
-test('A reassignment that would make an affected report their own manager (a degenerate cycle) is rejected via the same guard used elsewhere, atomically', async () => {
-  const { adminAgent, zsm, asm, bdm } = await buildFullChain();
-  const res = await adminAgent.put(`/api/users/${asm._id}`).send({
-    fieldForceTier: 'RSM',
-    reportingManagerId: String(zsm._id),
-    reassignments: [{ userId: String(bdm._id), reportingManagerId: String(bdm._id) }]
-  });
-  assert.equal(res.status, 400);
-  const reloadedAsm = await User.findById(asm._id);
-  assert.equal(reloadedAsm.employeeDetails.fieldForce.tier, 'ASM', 'tier change never committed');
-  const reloadedBdm = await User.findById(bdm._id);
-  assert.equal(String(reloadedBdm.employeeDetails.reportingManagerId), String(asm._id), 'reassignment never committed');
-});
-
-test('A genuinely circular reassignment (manager pointing to their own descendant) is rejected — the same wouldCreateCycle guard reused by the reassignments path', async () => {
-  const { adminAgent, zsm, rsm, asm, bdm } = await buildFullChain();
-  // A subordinate of bdm's own — same tier BDM requires (ASM) — whose
-  // reportingManagerId chain leads back to bdm, so reassigning bdm to
-  // report to it would close a cycle. bdm's own tier/manager are left
-  // exactly as `buildFullChain` set them, so the ASM -> RSM promotion below
-  // still flags bdm as affected exactly like the simple case.
-  const subordinate = await createUser({
-    companyId: rsm.companyId, email: `subordinate-${n}@xyz.com`,
-    employeeDetails: { fieldForce: { tier: 'ASM' }, reportingManagerId: bdm._id }
-  });
-
-  const res = await adminAgent.put(`/api/users/${asm._id}`).send({
-    fieldForceTier: 'RSM',
-    reportingManagerId: String(zsm._id),
-    reassignments: [{ userId: String(bdm._id), reportingManagerId: String(subordinate._id) }]
-  });
-  assert.equal(res.status, 400);
-  const reloadedAsm = await User.findById(asm._id);
-  assert.equal(reloadedAsm.employeeDetails.fieldForce.tier, 'ASM', 'tier change never committed');
-  const reloadedBdm = await User.findById(bdm._id);
-  assert.equal(String(reloadedBdm.employeeDetails.reportingManagerId), String(asm._id), 'reassignment never committed');
-});
-
-test('Changing a leaf BDM\'s tier (no direct reports) never triggers the affected-list mechanism — existing valid hierarchies remain unaffected', async () => {
-  const { adminAgent, rsm, bdm } = await buildFullChain();
-
-  const res = await adminAgent.put(`/api/users/${bdm._id}`).send({ fieldForceTier: 'ASM', reportingManagerId: String(rsm._id) });
+test('Clearing a JobRole (jobRoleId: null) removes field-force access but keeps the account and hierarchy link', async () => {
+  const { adminAgent, bdm } = await buildFullChain();
+  const res = await adminAgent.put(`/api/users/${bdm._id}`).send({ jobRoleId: null });
   assert.equal(res.status, 200);
-  assert.equal(res.body.reassignedCount, 0);
+  const after = await User.findById(bdm._id).lean();
+  assert.equal(after.employeeDetails.jobRole ?? null, null);
+  assert.ok(after.employeeDetails.reportingManagerId);
 });
 
 test('A BDM\'s submissions remain visible to the unrelated part of the chain (RSM) but never to an outside ASM after replacement', async () => {
@@ -523,7 +409,7 @@ test('A BDM\'s submissions remain visible to the unrelated part of the chain (RS
   const doctorRes = await asmAgent.post('/api/doctors').send({ name: 'Dr. Chain Test', assignedTo: String(bdm._id) });
   await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId: doctorRes.body.doctor._id });
 
-  const newAsm = await createUser({ companyId: rsm.companyId, email: `new-asm-chain-${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ASM' }, reportingManagerId: rsm._id } });
+  const newAsm = await createUser({ companyId: rsm.companyId, email: `new-asm-chain-${n}@xyz.com`, employeeDetails: { fieldRole: 'ASM', reportingManagerId: rsm._id } });
   await adminAgent.post('/api/admin/hierarchy/replace-manager').send({ oldManagerId: asm._id, newManagerId: newAsm._id });
 
   // The RSM above (unaffected by the ASM-level swap) still sees the BDM's DCR.

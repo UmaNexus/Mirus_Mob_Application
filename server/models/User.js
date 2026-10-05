@@ -1,7 +1,6 @@
 import mongoose from 'mongoose';
 import bcryptjs from 'bcryptjs';
 import tenantScope from './plugins/tenantScope.js';
-import { FIELD_TIERS } from '../config/fieldForce.js';
 
 const AddressSchema = new mongoose.Schema({
   street: { type: String, required: true, trim: true },
@@ -154,13 +153,12 @@ const UserSchema = new mongoose.Schema({
     employmentType: { type: String, enum: ['Full-Time', 'Part-Time', 'Permanent', 'Probation', 'Contract', 'Intern'], default: 'Full-Time' },
     workLocation: { type: String, trim: true }, // Epic 8
     reportingManagerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-    // Mobile field-force hierarchy (separate from `role`; see config/fieldForce.js).
-    // Fully optional/additive — absent on every pre-existing employee document,
-    // which is exactly "not a field-force user" and requires no migration.
-    fieldForce: {
-      tier: { type: String, enum: FIELD_TIERS, default: null },
-      territory: { type: String, trim: true, default: null }
-    },
+    // The employee's position, identified by an existing (tenant-scoped) JobRole
+    // document — JobRole.name is the ONLY field-force/mobile role identity (see
+    // services/fieldIdentity.js). Optional: HRMS users may legitimately have none;
+    // field-force endpoints then answer 403. Set only by the Admin role-assignment
+    // API or the explicit scripts/migrate-jobrole.js, never automatically at startup.
+    jobRole: { type: mongoose.Schema.Types.ObjectId, ref: 'JobRole', default: null, index: true },
     panNumber: { type: String, uppercase: true, trim: true },
     uanNumber: { type: String, trim: true },
     esiNumber: { type: String, trim: true }, // Epic 8 (statutory)
@@ -187,6 +185,8 @@ UserSchema.index(
   { companyId: 1, 'employeeDetails.employeeId': 1 },
   { unique: true, partialFilterExpression: { 'employeeDetails.employeeId': { $type: 'string' } } }
 );
+// "Is this user a manager?" is derived from the reporting graph (direct reports).
+UserSchema.index({ companyId: 1, 'employeeDetails.reportingManagerId': 1 });
 UserSchema.index({ 'personalDetails.firstName': 'text', 'personalDetails.lastName': 'text', 'employeeDetails.employeeId': 'text' });
 
 UserSchema.plugin(tenantScope);

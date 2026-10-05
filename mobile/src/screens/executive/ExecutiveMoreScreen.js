@@ -3,7 +3,7 @@ import { View, Text, Pressable, Linking, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LogOut, CalendarDays, ChevronRight, UserCog, ShieldCheck, Trash2 } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
-import { displayName, resolveUserTier } from '../../navigation/roleHelpers';
+import { displayName, roleLabel, isAdminUser } from '../../navigation/roleHelpers';
 import { WEB_APP_URL } from '../../config/webAppUrl';
 import { openAccountDeletionInBrowser } from '../../config/legalUrls';
 import Card from '../../components/Card';
@@ -13,8 +13,8 @@ import { colors, spacing, typography, iconSizes } from '../../theme';
 
 export default function ExecutiveMoreScreen({ navigation }) {
   const { user, signOut } = useAuth();
-  const tier = resolveUserTier(user);
-  const isAdmin = tier === 'ADMIN';
+  const tier = roleLabel(user);
+  const isAdmin = isAdminUser(user);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -26,7 +26,7 @@ export default function ExecutiveMoreScreen({ navigation }) {
 
         <Card style={styles.card}>
           <Text style={styles.name}>{displayName(user)}</Text>
-          <Text style={styles.role}>{isAdmin ? 'Admin · Company-wide' : `${tier} · ${user?.employeeDetails?.fieldForce?.territory || 'MIRUS'}`}</Text>
+          <Text style={styles.role}>{isAdmin ? 'Admin · Company-wide' : `${tier || 'Executive'} · MIRUS`}</Text>
         </Card>
 
         <NavRow icon={CalendarDays} title="Status Calendar" subtitle="Your holidays, leave, and attendance for the month" onPress={() => navigation.navigate('Calendar')} />

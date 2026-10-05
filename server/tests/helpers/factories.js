@@ -1,6 +1,7 @@
 import request from 'supertest';
 import User from '../../models/User.js';
 import Company from '../../models/Company.js';
+import JobRole from '../../models/JobRole.js';
 import { runWithStore } from '../../utils/tenantContext.js';
 
 /**
@@ -67,10 +68,36 @@ export const buildUser = (overrides = {}) => {
   };
 };
 
+/**
+ * Test shorthand -> exact production JobRole name. Tests pass `employeeDetails.fieldRole: 'ASM'`
+ * (a TEST-ONLY key, never stored); the helper finds/creates the real JobRole document in the
+ * user's company and sets `employeeDetails.jobRole` — exactly what production data looks like.
+ * 'NSM' (the old top tier) has no production JobRole; test chains use a ZSM-named role for it (no extra permissions).
+ */
+export const TEST_ROLE_NAMES = {
+  BDM: 'Business development manager',
+  ASM: 'Area sales manager',
+  RSM: 'Regional business manager',
+  ZSM: 'Zonal sales manager',
+  NSM: 'Zonal sales manager', // test chains need a role above RSM; production has no NSM JobRole, so this is just another ZSM
+  HR: 'HR',
+  ACCOUNTANT: 'Accountant',
+  ASSISTANT: 'Office assistant'
+};
+
+export const getOrCreateJobRole = async (companyId, name, extra = {}) => {
+  const existing = await JobRole.findOne({ companyId, name });
+  return existing || JobRole.create({ companyId, name, ...extra });
+};
+
 export const createUser = async (overrides = {}) => {
   const companyId = overrides.companyId || (await getDefaultCompany())._id;
   const { company, ...rest } = overrides; // strip non-schema helper key
-  return User.create(buildUser({ ...rest, companyId }));
+  const { fieldRole, ...employeeDetails } = rest.employeeDetails || {};
+  if (fieldRole) {
+    employeeDetails.jobRole = (await getOrCreateJobRole(companyId, TEST_ROLE_NAMES[fieldRole] || fieldRole))._id;
+  }
+  return User.create(buildUser({ ...rest, employeeDetails, companyId }));
 };
 
 /**

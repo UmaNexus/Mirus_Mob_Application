@@ -22,10 +22,10 @@ const setupAsmBdm = async () => {
   setupCounter += 1;
   const n = setupCounter;
   const company = await getDefaultCompany();
-  const { agent: asmAgent, user: asm } = await authAgent(app, { email: `asm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: `asm_${n}@xyz.com`, employeeDetails: { fieldRole: 'ASM' } });
   const bdm = await createUser({
     companyId: company._id, email: `bdm_${n}@xyz.com`, password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
   const bdmAgent = await loginAs(company, bdm);
   return { company, asmAgent, asm, bdm, bdmAgent };
@@ -37,7 +37,7 @@ test('unauthenticated request is rejected', async () => {
   assert.equal((await request(app).get('/api/work-type')).status, 401);
 });
 
-test('an employee with no fieldForce tier is denied', async () => {
+test('an employee with no field-force role is denied', async () => {
   const { agent } = await authAgent(app, { email: 'plain@xyz.com', role: 'employee' });
   assert.equal((await agent.get('/api/work-type')).status, 403);
 });
@@ -104,7 +104,7 @@ test('a BDM can log a joint work type with their own reporting manager', async (
 test('a BDM cannot claim an unrelated manager accompanied them', async () => {
   const { bdmAgent } = await setupAsmBdm();
   const company = await getDefaultCompany();
-  const unrelated = await createUser({ companyId: company._id, email: 'unrelated-mgr@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const unrelated = await createUser({ companyId: company._id, email: 'unrelated-mgr@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   const res = await bdmAgent.post('/api/work-type').send({ date: '2026-08-12', type: 'joint', details: { accompaniedBy: String(unrelated._id) } });
   assert.equal(res.status, 403);
 });
@@ -113,7 +113,7 @@ test('a same-ASM teammate BDM can accompany a joint work type', async () => {
   const { company, bdmAgent, asm } = await setupAsmBdm();
   const teammate = await createUser({
     companyId: company._id, email: 'teammate-wt@xyz.com',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
   const res = await bdmAgent.post('/api/work-type').send({ date: '2026-08-12', type: 'joint', details: { accompaniedBy: String(teammate._id) } });
   assert.equal(res.status, 200);
@@ -133,10 +133,10 @@ test('a Manager Meeting can select an eligible manager (ASM/RSM/ZSM/NSM)', async
 test('Admin cannot be selected as a Manager Meeting participant', async () => {
   const company = await getDefaultCompany();
   const { user: admin } = await authAgent(app, { company, email: 'admin-meeting@xyz.com', role: 'admin' });
-  const nsm = await createUser({ companyId: company._id, email: 'nsm-meeting@xyz.com', employeeDetails: { fieldForce: { tier: 'NSM' }, reportingManagerId: admin._id } });
+  const nsm = await createUser({ companyId: company._id, email: 'nsm-meeting@xyz.com', employeeDetails: { fieldRole: 'NSM', reportingManagerId: admin._id } });
   const bdm = await createUser({
     companyId: company._id, email: 'bdm-meeting@xyz.com', password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: nsm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: nsm._id }
   });
   const bdmAgent = await loginAs(company, bdm);
 
@@ -208,7 +208,7 @@ test('an admin in one company never sees work-type entries from another company'
   const companyA = await createCompany({ slug: 'wt-alpha' });
   const companyB = await createCompany({ slug: 'wt-beta' });
   const { agent: adminA } = await authAgent(app, { company: companyA, email: 'admin-a@xyz.com', role: 'admin' });
-  const bdmB = await createUser({ companyId: companyB._id, email: 'bdm-b@xyz.com', password: 'Password1', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  const bdmB = await createUser({ companyId: companyB._id, email: 'bdm-b@xyz.com', password: 'Password1', employeeDetails: { fieldRole: 'BDM' } });
   const bdmBAgent = await loginAs(companyB, bdmB);
   await bdmBAgent.post('/api/work-type').send({ date: '2026-08-12', type: 'individual' });
 

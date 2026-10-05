@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useAsync } from '../../hooks/useAsync';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import * as fieldForceApi from '../../api/fieldForce';
-import { resolveUserTier, displayName } from '../../navigation/roleHelpers';
+import { roleLabel, isAdminUser, displayName } from '../../navigation/roleHelpers';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
 import LoadingView from '../../components/LoadingView';
@@ -16,7 +16,6 @@ import BrandLogo from '../../components/BrandLogo';
 import NotificationBell from '../../components/NotificationBell';
 import { colors, spacing, typography } from '../../theme';
 
-const TIER_LABEL = { NSM: 'NSMs', ZSM: 'ZSMs', RSM: 'RSMs', ASM: 'ASMs', BDM: 'BDMs' };
 
 /**
  * Executive Home — NSM's own subtree, or Admin/superadmin's company-wide
@@ -26,16 +25,15 @@ const TIER_LABEL = { NSM: 'NSMs', ZSM: 'ZSMs', RSM: 'RSMs', ASM: 'ASMs', BDM: 'B
  */
 export default function ExecutiveHomeScreen({ navigation }) {
   const { user } = useAuth();
-  const tier = resolveUserTier(user);
-  const isAdmin = tier === 'ADMIN';
+  const tier = roleLabel(user);
+  const isAdmin = isAdminUser(user);
 
   const monthLabel = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
   const summary = useAsync(() => fieldForceApi.getOrgSummary(), []);
   useRefreshOnFocus(summary.reload);
 
   const data = summary.data;
-  const tierCounts = data?.tierCounts || {};
-  const tierEntries = Object.entries(tierCounts).filter(([, count]) => count > 0);
+  const roleEntries = (data?.roleCounts || []).filter((r) => r.count > 0);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -48,7 +46,7 @@ export default function ExecutiveHomeScreen({ navigation }) {
           <View style={styles.heroText}>
             <Text style={styles.heroName}>{displayName(user)}</Text>
             <Text style={styles.heroSub}>
-              {isAdmin ? 'Admin · Company-wide' : `${tier} · ${user?.employeeDetails?.fieldForce?.territory || 'MIRUS'}`}
+              {isAdmin ? 'Admin · Company-wide' : `${tier || 'Executive'} · MIRUS`}
             </Text>
           </View>
           <NotificationBell
@@ -69,8 +67,8 @@ export default function ExecutiveHomeScreen({ navigation }) {
             <Text style={typography.label}>Organization — {monthLabel}</Text>
             <Card style={styles.statCard}>
               <View style={styles.statGrid}>
-                {tierEntries.map(([t, count]) => (
-                  <Stat key={t} value={count} label={TIER_LABEL[t] || t} color={colors.ink} />
+                {roleEntries.map((r) => (
+                  <Stat key={r.jobRoleId || r.name} value={r.count} label={r.name} color={colors.ink} />
                 ))}
               </View>
             </Card>

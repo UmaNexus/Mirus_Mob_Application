@@ -8,6 +8,7 @@ import Expense from '../models/Expense.js';
 import Notification from '../models/Notification.js';
 import { dispatchNotification } from './notificationService.js';
 import { buildReportingChainAbove } from '../middleware/fieldForceAuth.js';
+import { findLeafFieldUsers } from './fieldIdentity.js';
 
 const dateKeyOf = (d) => new Date(d).toISOString().slice(0, 10);
 
@@ -85,10 +86,7 @@ export async function checkAttendancePunchInReminder() {
   const now = new Date();
   const todayKey = dateKeyOf(now);
 
-  const activeBdms = await User.find({
-    isActive: true,
-    'employeeDetails.fieldForce.tier': 'BDM',
-  }).select('_id personalDetails companyId');
+  const activeBdms = await findLeafFieldUsers({ isActive: true }, '_id personalDetails companyId');
 
   const attendanceRecords = await Attendance.find({
     dateKey: todayKey,
@@ -215,10 +213,7 @@ export async function checkMonthlyMtpCutoff() {
   const nextMonthDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
   const nextMonthKey = nextMonthDate.toISOString().slice(0, 7); // 'YYYY-MM'
 
-  const activeBdms = await User.find({
-    isActive: true,
-    'employeeDetails.fieldForce.tier': 'BDM',
-  }).select('_id companyId');
+  const activeBdms = await findLeafFieldUsers({ isActive: true }, '_id companyId');
 
   let sentCount = 0;
   for (const bdm of activeBdms) {

@@ -15,16 +15,19 @@ export default function EditUserDialog({ open, user, onClose, onSaved }) {
   const dispatch = useDispatch();
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
+  const [roleTouched, setRoleTouched] = useState(false);
 
   useEffect(() => {
     if (!user) return;
+    setRoleTouched(false);
     setForm({
       firstName: user.personalDetails?.firstName || '',
       lastName: user.personalDetails?.lastName || '',
       phone: user.contactInfo?.personalMobile || '',
       role: user.role || 'employee',
       department: user.employeeDetails?.department || '',
-      designation: user.employeeDetails?.designation || '',
+      workLocation: user.employeeDetails?.workLocation || '',
+      jobRoleId: user.employeeDetails?.jobRole?._id || (typeof user.employeeDetails?.jobRole === 'string' ? user.employeeDetails.jobRole : '') || '',
       employeeId: user.employeeDetails?.employeeId || '',
       isActive: Boolean(user.isActive)
     });
@@ -36,8 +39,12 @@ export default function EditUserDialog({ open, user, onClose, onSaved }) {
     e.preventDefault();
     setSaving(true);
     try {
-      const payload = { ...form };
+      // The role is sent as an id (chosen from the existing job roles); the server sets designation and
+      // employeeDetails.jobRole together. Only sent when the admin actually changed the selection.
+      const { jobRoleId, ...rest } = form;
+      const payload = { ...rest };
       if (!payload.department) delete payload.department;
+      if (roleTouched) payload.jobRoleId = jobRoleId || null;
       await updateUser(user._id, payload);
       dispatch(notifySuccess('User updated.'));
       onSaved?.();
@@ -68,10 +75,17 @@ export default function EditUserDialog({ open, user, onClose, onSaved }) {
           onChange={(v) => setForm({ ...form, department: v })}
           size="medium"
         />
+        <TextField
+          label="Work Location" value={form.workLocation || ''} onChange={set('workLocation')} fullWidth
+          placeholder="e.g. Hyderabad" helperText="The employee's current work location. Leave empty to clear it."
+          inputProps={{ maxLength: 120 }}
+        />
         <JobRoleSelect
           label="Role"
-          value={form.designation || ''}
-          onChange={(v) => setForm({ ...form, designation: v })}
+          byId
+          value={form.jobRoleId || ''}
+          onChange={(id) => { setRoleTouched(true); setForm({ ...form, jobRoleId: id }); }}
+          helperText={!form.jobRoleId && user?.employeeDetails?.designation ? `Designation "${user.employeeDetails.designation}" is not linked to a role yet — select the role to link it.` : undefined}
           className="sm:col-span-2"
           size="medium"
         />

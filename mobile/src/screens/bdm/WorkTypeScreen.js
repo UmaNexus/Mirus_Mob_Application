@@ -14,6 +14,7 @@ import SelectField from '../../components/SelectField';
 import StatusBadge from '../../components/StatusBadge';
 import ErrorBanner from '../../components/ErrorBanner';
 import { colors, radii, spacing, typography } from '../../theme';
+import { roleNameOf } from '../../navigation/roleHelpers';
 
 const TYPES = [
   { value: 'individual', icon: ClipboardList, label: 'Individual call' },
@@ -62,7 +63,7 @@ export default function WorkTypeScreen({ navigation }) {
   const doctorOptions = (doctors.data || []).map((d) => ({ label: d.name, value: d._id, sublabel: `${d.speciality} - ${d.area}` }));
 
   const userLabel = (u) => `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim() || 'Unnamed';
-  const userSublabel = (u) => [u.employeeDetails?.fieldForce?.tier, u.employeeDetails?.fieldForce?.territory].filter(Boolean).join(' · ');
+  const userSublabel = (u) => roleNameOf(u) || '';
   const managerOptions = (participants.data?.managers || []).map((m) => ({ label: userLabel(m), value: m._id, sublabel: userSublabel(m) }));
   const otherOptions = (participants.data?.others || []).map((m) => ({ label: userLabel(m), value: m._id, sublabel: userSublabel(m) }));
   // Joint Call: two categories — real managers above the BDM (ASM/RSM/ZSM/NSM,

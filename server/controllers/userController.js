@@ -21,7 +21,9 @@ import { PERMISSIONS, roleHasPermission } from '../config/permissions.js';
 import { clientOrigin } from '../utils/clientOrigin.js';
 import { logActivity } from '../services/activityService.js';
 import { withOptionalTransaction } from '../utils/withOptionalTransaction.js';
-import { assertValidManager, findNewlyBrokenDirectReports } from '../services/hierarchyGuard.js';
+import { assertValidManager, listEligibleManagers } from '../services/hierarchyGuard.js';
+import { resolveJobRoleOrThrow, assignJobRoleToUser, clearJobRoleOnUser } from '../services/jobRoleAssignment.js';
+import { JOB_ROLE_POPULATE } from '../services/fieldIdentity.js';
 
 const SETUP_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
 const displayName = (u) => `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim() || u.email;
@@ -75,6 +77,7 @@ export const listUsers = asyncHandler(async (req, res) => {
   const [data, total] = await Promise.all([
     User.find(filter)
       .select('-password -passwordSetup')
+      .populate(JOB_ROLE_POPULATE)
       .sort({ updatedAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit),
@@ -150,7 +153,6 @@ const EDITABLE = {
   'contactInfo.personalMobile': 'phone',
   role: 'role',
   isActive: 'isActive',
-  'employeeDetails.designation': 'designation',
   'employeeDetails.department': 'department',
   'employeeDetails.employeeId': 'employeeId',
   // Epic 8 employment + statutory fields, HR/Admin-editable.
@@ -158,9 +160,6 @@ const EDITABLE = {
   'employeeDetails.workLocation': 'workLocation',
   'employeeDetails.reportingManagerId': 'reportingManagerId',
   'employeeDetails.dateOfJoining': 'dateOfJoining',
-  // Mobile field-force hierarchy (separate from `role`; see config/fieldForce.js).
-  'employeeDetails.fieldForce.tier': 'fieldForceTier',
-  'employeeDetails.fieldForce.territory': 'fieldForceTerritory',
   'employeeDetails.esiNumber': 'esiNumber',
   'employeeDetails.professionalTaxNumber': 'professionalTaxNumber'
 };
@@ -169,20 +168,10 @@ const EDITABLE = {
  * PUT /api/users/:id
  * US 2.3 — edit a directory record. Admin/HR only (enforced at route).
  *
- * Hierarchy-integrity notes (organization hierarchy / Admin Dashboard):
- *  - A plain reporting-manager REASSIGNMENT (no tier change) only validates
- *    the one new manager being supplied — the existing behavior.
- *  - A field-force TIER change is a separate, riskier operation: changing a
- *    user's tier can silently invalidate (a) their OWN existing manager
- *    relationship, and (b) every EXISTING direct report who depended on this
- *    user's OLD tier (e.g. an ASM promoted to RSM must not leave their BDMs
- *    still attached — BDM requires an ASM parent, not an RSM). Both are
- *    checked and, if broken, must be resolved in the SAME request (own
- *    manager via `reportingManagerId`, direct reports via `reassignments`)
- *    or the whole tier change is rejected with the affected list — never
- *    silently left invalid. This does NOT apply to same-tier manager
- *    REPLACEMENT (POST /api/admin/hierarchy/replace-manager), which is a
- *    different operation and is intentionally untouched.
+ * A JobRole is assigned with `jobRoleId` (an ACTIVE JobRole of the user's own company, or
+ * null to clear). `reportingManagerId` is the only hierarchy field and is re-validated
+ * (see services/hierarchyGuard.js). Neither `designation` nor the HRMS `role` is derived
+ * from, or changed by, the JobRole.
  */
 export const updateUser = asyncHandler(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid user id');
@@ -196,85 +185,118 @@ export const updateUser = asyncHandler(async (req, res) => {
     throw new ApiError(403, 'You are not permitted to change user roles');
   }
 
-  const currentTier = user.employeeDetails?.fieldForce?.tier || null;
-  const requestedTier = req.body.fieldForceTier !== undefined ? (req.body.fieldForceTier || null) : currentTier;
-  const tierIsChanging = req.body.fieldForceTier !== undefined && requestedTier !== currentTier;
   const managerIdProvided = req.body.reportingManagerId !== undefined;
 
-  // A new reporting manager, whenever supplied, must be valid for the
-  // (possibly just-changed) effective tier — never trusts the client-supplied id.
-  if (managerIdProvided) {
-    await assertValidManager({ targetUserId: user._id, tier: requestedTier, candidateManagerId: req.body.reportingManagerId });
-  }
-
-  // Tier changing, manager NOT also being changed in this request => the
-  // EXISTING manager must still be valid for the new tier.
-  if (tierIsChanging && !managerIdProvided && user.employeeDetails?.reportingManagerId) {
-    try {
-      await assertValidManager({ targetUserId: user._id, tier: requestedTier, candidateManagerId: user.employeeDetails.reportingManagerId });
-    } catch (err) {
-      throw new ApiError(400, `Changing tier to "${requestedTier || 'none'}" would invalidate this user's own current reporting manager — assign a new one in the same request. (${err.message})`);
+  // JobRole assignment. A role chosen from the JobRoles list is applied through
+  // services/jobRoleAssignment.js so that designation (= JobRole.name) and employeeDetails.jobRole
+  // (= JobRole._id) are ALWAYS written together, from an existing active JobRole of the user's own
+  // company (validated server-side; never created here). Changing the role replaces both, so no
+  // stale reference to the old role can remain.
+  //  - jobRoleId present   -> that role (null/'' clears it); a `designation` sent alongside is ignored
+  //  - only `designation`  -> if it differs from the stored one it must name an existing active
+  //                           JobRole (exact match) and the role is linked; unchanged = untouched
+  let roleToAssign; // JobRole doc to assign
+  let roleCleared = false;
+  if (req.body.jobRoleId !== undefined) {
+    if (!req.body.jobRoleId) roleCleared = true;
+    else roleToAssign = await resolveJobRoleOrThrow({ companyId: user.companyId, jobRoleId: req.body.jobRoleId });
+  } else if (req.body.designation !== undefined) {
+    const wanted = String(req.body.designation ?? '').trim();
+    const current = String(user.employeeDetails?.designation ?? '').trim();
+    if (wanted !== current) {
+      if (!wanted) roleCleared = true;
+      else roleToAssign = await resolveJobRoleOrThrow({ companyId: user.companyId, name: wanted });
     }
   }
+  const jobRoleChange = roleToAssign ? roleToAssign._id : (roleCleared ? null : undefined);
 
-  // Every EXISTING direct report whose relationship to this user is newly
-  // broken by the tier change must be resolved in this same request (via
-  // `reassignments: [{ userId, reportingManagerId }]`) or the whole tier
-  // change is rejected with the affected list — this is the actual
-  // hierarchy-integrity bug: a BDM silently left under a manager who is no
-  // longer an ASM.
-  let reassignmentPlan = [];
-  if (tierIsChanging) {
-    const affected = await findNewlyBrokenDirectReports({ userId: user._id, oldTier: currentTier, newTier: requestedTier });
-    if (affected.length > 0) {
-      const provided = Array.isArray(req.body.reassignments) ? req.body.reassignments : [];
-      const reassignmentByUserId = new Map(
-        provided.filter((r) => r && r.userId && r.reportingManagerId).map((r) => [String(r.userId), String(r.reportingManagerId)])
-      );
+  // The role this user will hold after this request (for the hierarchy rule): the role being assigned,
+  // null when being cleared, undefined = unchanged.
+  const roleNameOverride = roleToAssign ? roleToAssign.name : (roleCleared ? null : undefined);
 
-      const stillUnresolved = affected.filter((a) => !reassignmentByUserId.has(a.id));
-      if (stillUnresolved.length > 0) {
-        throw new ApiError(
-          409,
-          `${affected.length} existing direct report${affected.length === 1 ? '' : 's'} would become invalid under the new tier and must be reassigned to a valid manager before continuing.`,
-          { affected }
-        );
-      }
-
-      // Every affected report IS covered — validate each new manager now, before any writes.
-      for (const a of affected) {
-        const newManagerId = reassignmentByUserId.get(a.id);
-        await assertValidManager({ targetUserId: a.id, tier: a.tier, candidateManagerId: newManagerId });
-        reassignmentPlan.push({ userId: a.id, reportingManagerId: newManagerId });
-      }
-    }
+  // A new reporting manager, whenever supplied, is fully re-validated server-side: exists in this company,
+  // active, not self, no cycle, and — the hierarchy — exactly the level above this user's (new) role
+  // (BDM->ASM, ASM->RSM, RSM->ZSM, ZSM->NSM, NSM->Admin; never same/lower level; Admin has none).
+  if (managerIdProvided && req.body.reportingManagerId) {
+    await assertValidManager({ targetUserId: user._id, candidateManagerId: req.body.reportingManagerId, roleNameOverride });
   }
 
-  // Commit the user's own field edits plus every resolved reassignment
-  // atomically — a failed hierarchy update can never partially modify users.
+  // Commit the user's edits atomically.
   await withOptionalTransaction(async (session) => {
     for (const [path, bodyKey] of Object.entries(EDITABLE)) {
       if (req.body[bodyKey] !== undefined) user.set(path, req.body[bodyKey]);
     }
+    // Clearing the work location (empty / null) removes the value instead of storing an empty string.
+    if (req.body.workLocation !== undefined && !String(req.body.workLocation ?? '').trim()) {
+      user.set('employeeDetails.workLocation', undefined);
+    }
+    if (roleToAssign) assignJobRoleToUser(user, roleToAssign);
+    else if (roleCleared) {
+      clearJobRoleOnUser(user);
+      if (req.body.jobRoleId === undefined) user.set('employeeDetails.designation', ''); // designation explicitly emptied
+    }
     await user.save({ session });
 
-    for (const r of reassignmentPlan) {
-      await User.updateOne({ _id: r.userId }, { $set: { 'employeeDetails.reportingManagerId': r.reportingManagerId } }).session(session);
-    }
   });
 
-  if (reassignmentPlan.length > 0) {
+  if (jobRoleChange !== undefined) {
     await logActivity({
       actor: req.user,
-      action: 'user.hierarchy.tierChangeReassignment',
+      action: 'user.jobRole.changed',
       entityType: 'User',
       entityId: user._id,
-      message: `${displayName(user)}'s tier change to "${requestedTier || 'none'}" reassigned ${reassignmentPlan.length} direct report(s) to a new manager`,
-      meta: { userId: String(user._id), newTier: requestedTier, reassignmentPlan }
+      message: `${displayName(user)}'s job role was ${jobRoleChange ? 'changed' : 'cleared'}`,
+      meta: { userId: String(user._id), jobRoleId: jobRoleChange ? String(jobRoleChange) : null }
     });
   }
 
-  res.status(200).json({ success: true, message: 'User updated', user: toPublicUser(user), reassignedCount: reassignmentPlan.length });
+  // A role change never rewrites reportingManagerId. If the EXISTING manager no longer satisfies the
+  // hierarchy for the new role, say so (the Org Hierarchy view also flags it) instead of changing data.
+  let hierarchyWarning = null;
+  if (roleToAssign && !managerIdProvided && user.employeeDetails?.reportingManagerId) {
+    try {
+      await assertValidManager({ targetUserId: user._id, candidateManagerId: user.employeeDetails.reportingManagerId });
+    } catch (err) {
+      if (err.statusCode === 400 || err.status === 400) hierarchyWarning = `Role saved, but the current reporting manager is no longer valid: ${err.message}`;
+      else throw err;
+    }
+  }
+
+  await user.populate(JOB_ROLE_POPULATE);
+  res.status(200).json({ success: true, message: 'User updated', user: toPublicUser(user), ...(hierarchyWarning ? { hierarchyWarning } : {}) });
+});
+
+/**
+ * GET /api/users/:id/eligible-managers[?jobRoleId=] — the ONLY candidates the UI may offer as this user's
+ * reporting manager, computed server-side from the hierarchy (services/hierarchyGuard.js). `jobRoleId` previews
+ * the candidates for a role being chosen in the same dialog; without it the user's stored role is used.
+ */
+export const getEligibleManagers = asyncHandler(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw new ApiError(400, 'Invalid user id');
+  const target = await User.findById(req.params.id).select('role companyId employeeDetails.jobRole').populate(JOB_ROLE_POPULATE);
+  if (!target || target.deletedAt) throw new ApiError(404, 'User not found');
+  let roleNameOverride;
+  if (req.query.jobRoleId !== undefined) {
+    roleNameOverride = req.query.jobRoleId
+      ? (await resolveJobRoleOrThrow({ companyId: target.companyId, jobRoleId: req.query.jobRoleId })).name
+      : null;
+  }
+  const managers = await listEligibleManagers({ target, roleNameOverride });
+  // When nobody active qualifies, say who WOULD qualify but is inactive (they are never offered).
+  const inactiveEligible = managers.length === 0
+    ? (await listEligibleManagers({ target, roleNameOverride, active: false })).map((m) => displayName(m))
+    : [];
+  res.status(200).json({
+    success: true,
+    inactiveEligible,
+    data: managers.map((m) => ({
+      _id: m._id,
+      name: displayName(m),
+      employeeId: m.employeeDetails?.employeeId || null,
+      isAdmin: m.role === 'admin' || m.role === 'superadmin',
+      roleName: m.role === 'admin' || m.role === 'superadmin' ? 'Admin' : (m.employeeDetails?.jobRole?.name || null)
+    }))
+  });
 });
 
 /**
@@ -382,6 +404,7 @@ export const generateCredentials = asyncHandler(async (req, res) => {
 
   const offer = await findLatestProvisionableOffer(user.email)
     || await OfferLetter.findOne({ candidateEmail: user.email }).sort({ createdAt: -1 });
+  if (offer) await resolveJobRoleOrThrow({ companyId: user.companyId, jobRoleId: offer.jobRoleId, name: offer.position }); // validate before changing anything
   if (offer && offer.status !== 'accepted' && offer.status !== 'declined') {
     await acceptOfferForProvisioning(offer, { approvedBy: req.user._id });
   }

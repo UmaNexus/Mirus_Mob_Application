@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import ExcelJS from 'exceljs';
 import * as db from './helpers/testDb.js';
 import app from '../app.js';
-import { authAgent } from './helpers/factories.js';
+import { authAgent, getOrCreateJobRole } from './helpers/factories.js';
 import { clearOutbox, getOutbox } from '../services/emailService.js';
 import SalaryStructureTemplate from '../models/SalaryStructureTemplate.js';
 
@@ -23,6 +23,8 @@ const TEMPLATE = {
 const setup = async () => {
   const { agent, company } = await authAgent(app, { email: 'hr@xyz.com', role: 'hr' });
   const tpl = await SalaryStructureTemplate.create({ ...TEMPLATE, companyId: company._id });
+  // Offers pick an EXISTING job role of the company (never created by the offer flow).
+  for (const name of ['UI/UX Designer', 'Analyst', 'QA Engineer', 'AE']) await getOrCreateJobRole(company._id, name);
   return { agent, tpl, company };
 };
 

@@ -21,16 +21,16 @@ export const getTeamPerformance = (month) =>
 
 /**
  * The caller's own reporting subtree's attendance for today/this week/this
- * month, plus a fixed current-month summary. `tier` (optional) generalizes
- * this beyond BDM for the NSM/Admin executive Attendance tab — omit it to
- * get the exact existing BDM-only behavior every ASM/RSM/ZSM screen relies on.
+ * month, plus a fixed current-month summary. `jobRoleId` (optional) selects any
+ * role in scope for the executive Attendance tab — omit it to get the leaf
+ * field-rep behavior every manager screen relies on.
  */
-export const getTeamAttendance = (period, tier) =>
-  api.get('/field-force/team-attendance', { params: { period, tier } }).then((res) => res.data);
+export const getTeamAttendance = (period, jobRoleId) =>
+  api.get('/field-force/team-attendance', { params: { period, jobRoleId } }).then((res) => res.data);
 
 // ---- NSM/Admin executive monitoring — read-only, no approval/decision route ----
 
-/** Home screen roll-up: tier counts, attendance-today, DCR/MTP rates, pending counts, doctor coverage — scoped to the caller's own subtree, or company-wide for admin/superadmin. */
+/** Home screen roll-up: role counts, attendance-today, DCR/MTP rates, pending counts, doctor coverage — scoped to the caller's own subtree, or company-wide for admin/superadmin. */
 export const getOrgSummary = (month) => api.get('/field-force/org-summary', { params: { month } }).then((res) => res.data.data);
 
 /**
@@ -38,8 +38,8 @@ export const getOrgSummary = (month) => api.get('/field-force/org-summary', { pa
  * Omit `managerId` for the top of the caller's own scope; pass it (always
  * re-validated server-side) to drill into that manager's direct reports.
  */
-export const getTierDirectory = ({ tier, managerId, month } = {}) =>
-  api.get('/field-force/tier-directory', { params: { tier, managerId, month } }).then((res) => res.data);
+export const getTierDirectory = ({ managerId, month } = {}) =>
+  api.get('/field-force/tier-directory', { params: { managerId, month } }).then((res) => res.data);
 
 /** Reports tab period summary (today/week/month/quarter/ytd) plus the same numbers for the immediately preceding period. */
 export const getReportsSummary = (period) => api.get('/field-force/reports-summary', { params: { period } }).then((res) => res.data);

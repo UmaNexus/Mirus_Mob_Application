@@ -3,7 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Receipt, ListChecks, Store, ChartNoAxesCombined, CalendarDays, Bell, LogOut, Palmtree, ShieldCheck } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
-import { displayName } from '../../navigation/roleHelpers';
+import { displayName, roleNameOf } from '../../navigation/roleHelpers';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
 import BrandLogo from '../../components/BrandLogo';
@@ -41,7 +41,7 @@ export default function MoreScreen({ navigation }) {
 
       <Card style={styles.account}>
         <Text style={typography.body}>{displayName(user)}</Text>
-        <Text style={typography.subtitle}>BDM · {user?.employeeDetails?.fieldForce?.territory || 'MIRUS'}</Text>
+        <Text style={typography.subtitle}>{roleNameOf(user) || 'Field'} · MIRUS</Text>
         <Button icon={LogOut} title="Sign out" variant="outline" onPress={signOut} style={styles.signOutBtn} />
       </Card>
 

@@ -76,7 +76,7 @@ export const getNotifications = asyncHandler(async (req, res) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .populate('senderId', 'personalDetails.firstName personalDetails.lastName role employeeDetails.fieldForce')
+      .populate('senderId', 'personalDetails.firstName personalDetails.lastName role')
       .lean(),
     Notification.countDocuments(filter),
     Notification.countDocuments({ recipientId: req.user._id, isRead: false }),

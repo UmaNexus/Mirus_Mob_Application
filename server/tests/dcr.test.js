@@ -24,10 +24,10 @@ const setupAsmBdmDoctor = async () => {
   setupCounter += 1;
   const n = setupCounter;
   const company = await getDefaultCompany();
-  const { agent: asmAgent, user: asm } = await authAgent(app, { email: `asm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: `asm_${n}@xyz.com`, employeeDetails: { fieldRole: 'ASM' } });
   const bdm = await createUser({
     companyId: company._id, email: `bdm_${n}@xyz.com`, password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
   const bdmAgent = await loginAs(company, bdm);
   const doctorRes = await asmAgent.post('/api/doctors').send({ name: 'Dr. Field', assignedTo: String(bdm._id) });
@@ -40,7 +40,7 @@ test('unauthenticated request is rejected', async () => {
   assert.equal((await request(app).get('/api/dcr')).status, 401);
 });
 
-test('an employee with no fieldForce tier is denied', async () => {
+test('an employee with no field-force role is denied', async () => {
   const { agent } = await authAgent(app, { email: 'plain@xyz.com', role: 'employee' });
   assert.equal((await agent.get('/api/dcr')).status, 403);
   assert.equal((await agent.post('/api/dcr').send({ type: 'individual', doctorId: '000000000000000000000000' })).status, 403);
@@ -82,7 +82,7 @@ test('a BDM can log a joint call with their own reporting manager', async () => 
 test('a BDM cannot log a joint call claiming an unrelated manager accompanied them', async () => {
   const { bdmAgent, doctorId } = await setupAsmBdmDoctor();
   const company = await getDefaultCompany();
-  const unrelatedManager = await createUser({ companyId: company._id, email: 'unrelated-mgr@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const unrelatedManager = await createUser({ companyId: company._id, email: 'unrelated-mgr@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
 
   const res = await bdmAgent.post('/api/dcr').send({ type: 'joint', doctorId, accompaniedBy: String(unrelatedManager._id) });
   assert.equal(res.status, 403);
@@ -100,20 +100,20 @@ const setupFullChainWithTeam = async () => {
   const n = setupCounter;
   const company = await getDefaultCompany();
   const { agent: adminAgent, user: admin } = await authAgent(app, { company, email: `admin_${n}@xyz.com`, role: 'admin' });
-  const nsm = await createUser({ companyId: company._id, email: `nsm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'NSM' }, reportingManagerId: admin._id } });
-  const zsm = await createUser({ companyId: company._id, email: `zsm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ZSM' }, reportingManagerId: nsm._id } });
-  const rsm = await createUser({ companyId: company._id, email: `rsm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'RSM' }, reportingManagerId: zsm._id } });
+  const nsm = await createUser({ companyId: company._id, email: `nsm_${n}@xyz.com`, employeeDetails: { fieldRole: 'NSM', reportingManagerId: admin._id } });
+  const zsm = await createUser({ companyId: company._id, email: `zsm_${n}@xyz.com`, employeeDetails: { fieldRole: 'ZSM', reportingManagerId: nsm._id } });
+  const rsm = await createUser({ companyId: company._id, email: `rsm_${n}@xyz.com`, employeeDetails: { fieldRole: 'RSM', reportingManagerId: zsm._id } });
   const asm = await createUser({
     companyId: company._id, email: `asm_${n}@xyz.com`, password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'ASM' }, reportingManagerId: rsm._id }
+    employeeDetails: { fieldRole: 'ASM', reportingManagerId: rsm._id }
   });
   const bdm = await createUser({
     companyId: company._id, email: `bdm_${n}@xyz.com`, password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
   const teammateBdm = await createUser({
     companyId: company._id, email: `teammate_${n}@xyz.com`, password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
   const bdmAgent = await loginAs(company, bdm);
   const asmAgent = await loginAs(company, asm);
@@ -162,7 +162,7 @@ test('a BDM from an unrelated ASM/team cannot be selected as Joint Call companio
 test('a cross-tenant participant is rejected as a Joint Call companion', async () => {
   const { bdmAgent, doctorId } = await setupFullChainWithTeam();
   const companyB = await createCompany({ slug: 'dcr-joint-cross-tenant' });
-  const crossTenantAsm = await createUser({ companyId: companyB._id, email: 'cross-tenant-asm-joint@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const crossTenantAsm = await createUser({ companyId: companyB._id, email: 'cross-tenant-asm-joint@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   const res = await bdmAgent.post('/api/dcr').send({ type: 'joint', doctorId, accompaniedBy: String(crossTenantAsm._id) });
   assert.equal(res.status, 403);
 });
@@ -235,11 +235,11 @@ test('an admin in one company never sees DCR entries from another company', asyn
   const companyB = await createCompany({ slug: 'dcr-beta' });
 
   const { agent: adminA } = await authAgent(app, { company: companyA, email: 'admin-a@xyz.com', role: 'admin' });
-  const { agent: asmBAgent } = await authAgent(app, { company: companyB, email: 'asm-b@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmBAgent } = await authAgent(app, { company: companyB, email: 'asm-b@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   const asmB = await User.findOne({ email: 'asm-b@xyz.com' });
   const bdmB = await createUser({
     companyId: companyB._id, email: 'bdm-b@xyz.com', password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asmB._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asmB._id }
   });
   const bdmBAgent = await loginAs(companyB, bdmB);
   const doctorB = await asmBAgent.post('/api/doctors').send({ name: 'Dr. Beta', assignedTo: String(bdmB._id) });
@@ -275,7 +275,7 @@ test('area is always the doctor\'s own Doctor.area — a client-supplied area fi
 
 test('a cross-tenant doctorId is rejected exactly like an unauthorized one', async () => {
   const companyB = await createCompany({ slug: 'dcr-cross-tenant' });
-  const { agent: asmBAgent } = await authAgent(app, { company: companyB, email: 'asm-crosstenant@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmBAgent } = await authAgent(app, { company: companyB, email: 'asm-crosstenant@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   const doctorB = await asmBAgent.post('/api/doctors').send({ name: 'Dr. OtherTenant' });
 
   const { bdmAgent } = await setupAsmBdmDoctor();
@@ -838,10 +838,10 @@ test('admin sees company-wide calls via /team, correctly excluding another tenan
   await bdmAgent.post('/api/dcr').send({ type: 'individual', doctorId, date: daysAgoISO(0) });
 
   const companyB = await createCompany({ slug: 'dcr-review-admin-cross-tenant' });
-  const asmB = await createUser({ companyId: companyB._id, email: 'asmb-review@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const asmB = await createUser({ companyId: companyB._id, email: 'asmb-review@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   const bdmB = await createUser({
     companyId: companyB._id, email: 'bdmb-review@xyz.com', password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asmB._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asmB._id }
   });
   const bdmBAgent = await loginAs(companyB, bdmB);
   const asmBAgent = await loginAs(companyB, asmB);

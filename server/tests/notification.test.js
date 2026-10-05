@@ -33,13 +33,13 @@ const setupHierarchy = async () => {
   });
   const { agent: asmAgent, user: asm } = await authAgent(app, {
     email: `asm_${n}@xyz.com`,
-    employeeDetails: { fieldForce: { tier: 'ASM' } },
+    employeeDetails: { fieldRole: 'ASM' },
   });
   const bdm = await createUser({
     companyId: company._id,
     email: `bdm_${n}@xyz.com`,
     password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id },
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id },
   });
   const bdmAgent = await loginAs(company, bdm);
   return { company, admin, adminAgent, asm, asmAgent, bdm, bdmAgent };
@@ -256,7 +256,7 @@ test('creating doctor and reassigning doctor dispatches DOCTOR_ASSIGNED_NEW and 
     companyId: company._id,
     email: 'bdm2@xyz.com',
     password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id },
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id },
   });
 
   // ASM creates doctor assigned to BDM

@@ -4,6 +4,7 @@ import asyncHandler from '../utils/asyncHandler.js';
 import { verifyJwt, COOKIE_NAME } from '../utils/jwt.js';
 import { setTenant } from '../utils/tenantContext.js';
 import { roleHasPermission } from '../config/permissions.js';
+import { JOB_ROLE_POPULATE } from '../services/fieldIdentity.js';
 
 /**
  * verifyToken — authenticates the request.
@@ -32,7 +33,9 @@ export const verifyToken = asyncHandler(async (req, res, next) => {
   setTenant({ companyId: payload.companyId, role: payload.role });
 
   // Superadmins live in the platform tenant and read across companies.
-  const query = User.findById(payload.sub).select('-password');
+  // `populate` resolves the user's JobRole name (tenant-scoped); a missing /
+  // deleted / foreign JobRole simply populates to null — never an error.
+  const query = User.findById(payload.sub).select('-password').populate(JOB_ROLE_POPULATE);
   const user = await (payload.role === 'superadmin' ? query.skipTenant() : query);
   if (!user) {
     throw new ApiError(401, 'Account no longer exists');
@@ -76,7 +79,7 @@ export const requirePermission = (permission) => (req, res, next) => {
 
 /**
  * requireNonAdmin — guards self-service capabilities that every employee
- * should have regardless of HRMS role or field-force tier (e.g. the mobile
+ * should have regardless of HRMS role or field-force role (e.g. the mobile
  * app's own punch in/out) — only Admin/superadmin are excluded, since they
  * manage the organization rather than punch their own attendance here. Must
  * run after verifyToken.

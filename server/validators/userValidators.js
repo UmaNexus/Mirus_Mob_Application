@@ -1,5 +1,4 @@
 import { body } from 'express-validator';
-import { FIELD_TIERS } from '../config/fieldForce.js';
 
 export const updateUserRules = [
   body('firstName').optional().isString().trim().notEmpty().withMessage('First name cannot be empty'),
@@ -12,12 +11,12 @@ export const updateUserRules = [
   body('employeeId').optional().isString().trim().notEmpty().withMessage('Employee ID cannot be empty'),
   // Epic 8 employment + statutory fields.
   body('employmentType').optional().isIn(['Full-Time', 'Part-Time', 'Permanent', 'Probation', 'Contract', 'Intern']).withMessage('Invalid employment type'),
-  body('workLocation').optional().isString().trim(),
+  // Work location (employeeDetails.workLocation): free text; an empty string or null clears it.
+  body('workLocation').optional({ nullable: true }).isString().trim().isLength({ max: 120 }).withMessage('Work location is too long'),
   body('reportingManagerId').optional().isMongoId().withMessage('Invalid reporting manager id'),
   body('dateOfJoining').optional().isISO8601().withMessage('dateOfJoining must be a valid date'),
   body('esiNumber').optional().isString().trim(),
   body('professionalTaxNumber').optional().isString().trim(),
-  // Mobile field-force hierarchy (separate from `role`).
-  body('fieldForceTier').optional({ nullable: true }).isIn(FIELD_TIERS).withMessage('Invalid field-force tier'),
-  body('fieldForceTerritory').optional({ nullable: true }).isString().trim()
+  // Job role (field-force identity): an existing JobRole id of the user's company, or null to clear.
+  body('jobRoleId').optional({ nullable: true, checkFalsy: true }).isMongoId().withMessage('Invalid job role id')
 ];

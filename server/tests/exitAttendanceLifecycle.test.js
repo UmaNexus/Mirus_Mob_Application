@@ -173,7 +173,7 @@ test('7. punchIn blocks mobile punch-in when today is past lastWorkingDay', asyn
 
   const { agent, user: emp } = await authAgent(app, {
     role: 'employee',
-    employeeDetails: { fieldForce: { tier: 'BDM' } }
+    employeeDetails: { fieldRole: 'BDM' }
   });
 
   await ExitRecord.create({

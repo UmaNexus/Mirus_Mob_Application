@@ -1,3 +1,4 @@
+import { resolveJobRoleOrThrow } from '../services/jobRoleAssignment.js';
 import path from 'node:path';
 import fs from 'node:fs';
 import mongoose from 'mongoose';
@@ -113,10 +114,16 @@ const deliverOfferEmail = async ({ offer, fullName, offerUrl, subject, body, ann
  * Emails only when `sendEmail` is true (bulk / default API). Preview flow uses sendEmail:false.
  * @returns {{ offer, accessToken, offerUrl, emailPreview }}
  */
-const createOfferCore = async (payload, { sendEmail = true } = {}) => {
-  const { candidateEmail, fullName, position, department, joiningDate, offerDate } = payload;
+const createOfferCore = async (payload, { sendEmail = true, companyId } = {}) => {
+  const { candidateEmail, fullName, department, joiningDate, offerDate } = payload;
   const annualCTC = Number(payload.annualCTC);
   if (!Number.isFinite(annualCTC) || annualCTC <= 0) throw new ApiError(400, 'annualCTC must be a positive number');
+
+  // The offer's position IS an existing, active JobRole of this company (validated here, before anything
+  // is created). `position` is always the role's own name, and the role id travels with the offer so
+  // approval can set employeeDetails.jobRole. Never creates a JobRole.
+  const jobRole = await resolveJobRoleOrThrow({ companyId, jobRoleId: payload.jobRoleId, name: payload.position });
+  const position = jobRole.name;
 
   const template = await resolveTemplate(payload);
   const offerDt = offerDate || new Date();
@@ -184,6 +191,7 @@ const createOfferCore = async (payload, { sendEmail = true } = {}) => {
   const offer = await OfferLetter.create({
     candidateEmail: String(candidateEmail).toLowerCase().trim(),
     fullName, position, department,
+    jobRoleId: jobRole._id,
     phone: payload.phone || '',
     city: payload.city || '',
     location: payload.location || '',
@@ -219,7 +227,7 @@ const createOfferCore = async (payload, { sendEmail = true } = {}) => {
  */
 export const createOffer = asyncHandler(async (req, res) => {
   const sendEmail = !(req.body.sendEmail === false || req.body.sendEmail === 'false');
-  const { offer, accessToken, offerUrl, emailPreview, email } = await createOfferCore(req.body, { sendEmail });
+  const { offer, accessToken, offerUrl, emailPreview, email } = await createOfferCore(req.body, { sendEmail, companyId: req.user.companyId });
   await logActivity({
     actor: req.user,
     action: sendEmail ? 'offer.send' : 'offer.create',
@@ -357,8 +365,10 @@ export const bulkCreateOffers = asyncHandler(async (req, res) => {
         department: cell(row, colOf.department),
         annualCTC: cell(row, colOf.annualctc),
         joiningDate: cell(row, colOf.joiningdate),
-        templateName: cell(row, colOf.templatename)
-      });
+        templateName: cell(row, colOf.templatename),
+        // Optional roster column: the offer's Job Location ("location" / "joblocation").
+        location: (colOf.joblocation || colOf.location) ? (cell(row, colOf.joblocation || colOf.location) || undefined) : undefined
+      }, { companyId: req.user.companyId });
       results.created.push({ row: r, offerId: offer._id, email: offer.candidateEmail });
     } catch (err) {
       results.failed.push({ row: r, email, error: err.message });
@@ -476,6 +486,10 @@ export const approveOffer = asyncHandler(async (req, res) => {
   if (offer.status === 'accepted') throw new ApiError(400, 'Offer already approved');
   if (offer.status === 'declined') throw new ApiError(400, 'Cannot approve a declined offer');
   if (offer.status !== 'signed') throw new ApiError(400, 'Offer has not been signed by the candidate yet');
+
+  // Fail BEFORE anything is changed if the offer's job role no longer exists / is inactive (designation and
+  // employeeDetails.jobRole are written together at provisioning; never a designation alone).
+  await resolveJobRoleOrThrow({ companyId: offer.companyId, jobRoleId: offer.jobRoleId, name: offer.position });
 
   await acceptOfferForProvisioning(offer, { approvedBy: req.user._id });
 

@@ -42,8 +42,8 @@ export function AuthProvider({ children }) {
           setStatus('unauthenticated');
           return;
         }
-        const { user: me } = await authApi.getCurrentUser();
-        setUser(me);
+        const { user: me, fieldAccess } = await authApi.getCurrentUser();
+        setUser({ ...me, fieldAccess });
         setStatus('authenticated');
       } catch {
         await clearToken().catch(() => {});
@@ -62,9 +62,10 @@ export function AuthProvider({ children }) {
         throw new Error('Login succeeded but no token was returned');
       }
       await saveToken(res.token);
-      setUser(res.user);
+      const signedIn = { ...res.user, fieldAccess: res.fieldAccess };
+      setUser(signedIn);
       setStatus('authenticated');
-      return res.user;
+      return signedIn;
     } catch (err) {
       const message = err.uiMessage || err.message || 'Login failed';
       setError(message);

@@ -2,11 +2,9 @@ import React, { useMemo, useState } from 'react';
 import { View, Text, FlatList, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Users } from 'lucide-react-native';
-import { useAuth } from '../../context/AuthContext';
 import { useAsync } from '../../hooks/useAsync';
 import { useRefreshOnFocus } from '../../hooks/useRefreshOnFocus';
 import * as fieldForceApi from '../../api/fieldForce';
-import { resolveUserTier } from '../../navigation/roleHelpers';
 import LoadingView from '../../components/LoadingView';
 import ErrorBanner from '../../components/ErrorBanner';
 import EmptyState from '../../components/EmptyState';
@@ -21,8 +19,6 @@ const PERIODS = [
   { value: 'month', label: 'This Month' }
 ];
 
-/** The tiers this caller is allowed to view attendance for, top of their scope down to BDM. */
-const tiersForCaller = (tier) => (tier === 'ADMIN' ? ['NSM', 'ZSM', 'RSM', 'ASM', 'BDM'] : ['ZSM', 'RSM', 'ASM', 'BDM']);
 
 /**
  * Executive Attendance — a flat, per-tier attendance list across the
@@ -31,14 +27,23 @@ const tiersForCaller = (tier) => (tier === 'ADMIN' ? ['NSM', 'ZSM', 'RSM', 'ASM'
  * GET /api/field-force/team-attendance, generalized with a `tier` param.
  */
 export default function ExecutiveAttendanceScreen() {
-  const { user } = useAuth();
-  const callerTier = resolveUserTier(user);
-  const tiers = useMemo(() => tiersForCaller(callerTier), [callerTier]);
+  // Chips come from the roles that actually exist in the caller's scope (server roleCounts,
+  // by JobRole) — no role names or ladder are hard-coded in the app.
+  const orgSummary = useAsync(() => fieldForceApi.getOrgSummary(), []);
+  const roles = useMemo(
+    () => (orgSummary.data?.roleCounts || []).map((r) => ({ key: r.jobRoleId, jobRoleId: r.jobRoleId, name: r.name })),
+    [orgSummary.data]
+  );
 
   const [period, setPeriod] = useState('today');
-  const [tier, setTier] = useState(tiers[tiers.length - 1] || 'BDM');
+  const [selectedKey, setSelectedKey] = useState(null);
+  const selected = roles.find((r) => r.key === selectedKey) || roles[0] || null;
+  const tier = selected?.name || 'Employee';
 
-  const attendance = useAsync(() => fieldForceApi.getTeamAttendance(period, tier), [period, tier]);
+  const attendance = useAsync(
+    () => (selected ? fieldForceApi.getTeamAttendance(period, selected.jobRoleId) : Promise.resolve(null)),
+    [period, selected?.key]
+  );
   useRefreshOnFocus(attendance.reload);
 
   const summary = attendance.data?.summary;
@@ -53,9 +58,9 @@ export default function ExecutiveAttendanceScreen() {
       </View>
 
       <View style={styles.chipRow}>
-        {tiers.map((t) => (
-          <Pressable key={t} onPress={() => setTier(t)} style={[styles.chip, tier === t && styles.chipActive]}>
-            <Text style={[styles.chipText, tier === t && styles.chipTextActive]}>{t}</Text>
+        {roles.map((r) => (
+          <Pressable key={r.key} onPress={() => setSelectedKey(r.key)} style={[styles.chip, selected?.key === r.key && styles.chipActive]}>
+            <Text style={[styles.chipText, selected?.key === r.key && styles.chipTextActive]}>{r.name}</Text>
           </Pressable>
         ))}
       </View>
@@ -71,13 +76,13 @@ export default function ExecutiveAttendanceScreen() {
       {attendance.status === 'loading' && <LoadingView />}
       {attendance.status === 'error' && <ErrorBanner message={attendance.error} />}
 
-      <AttendanceSummaryCard summary={summary} totalLabel={`Total ${tier}s`} />
+      <AttendanceSummaryCard summary={summary} totalLabel={`Total ${tier}`} />
 
       <FlatList
         contentContainerStyle={styles.list}
         data={rows}
         keyExtractor={(item) => String(item.userId)}
-        ListEmptyComponent={attendance.status === 'success' ? <EmptyState icon={Users} title={`No ${tier}s in this scope`} /> : null}
+        ListEmptyComponent={attendance.status === 'success' ? <EmptyState icon={Users} title={`No ${tier} in this scope`} /> : null}
         ListFooterComponent={monthlySummary ? <MonthlySummaryCard monthlySummary={monthlySummary} /> : null}
         renderItem={({ item }) => <AttendanceRow item={item} period={period} />}
       />

@@ -3,7 +3,8 @@ import { body } from 'express-validator';
 export const createOfferRules = [
   body('candidateEmail').isEmail().withMessage('Valid candidate email is required').normalizeEmail({ gmail_remove_dots: false }),
   body('fullName').isString().trim().notEmpty().withMessage('Full name is required'),
-  body('position').isString().trim().notEmpty().withMessage('Position is required'),
+  body('jobRoleId').optional({ nullable: true, checkFalsy: true }).isMongoId().withMessage('Invalid job role id'),
+  body('position').if(body('jobRoleId').not().exists({ checkFalsy: true })).isString().trim().notEmpty().withMessage('A job role (jobRoleId) or position is required'),
   body('department').isString().trim().notEmpty().withMessage('Department is required'),
   body('joiningDate').isISO8601().withMessage('joiningDate must be a valid date'),
   body('offerDate').optional().isISO8601().withMessage('offerDate must be a valid date'),

@@ -8,14 +8,14 @@
  *    - Email: reviewer.bdm@mirus.com
  *    - Employee ID: MMS-REV-001
  *    - Password: Reviewer@2026!
- *    - Tier: BDM (Territory: Banjara Hills - Hyderabad)
+ *    - Role: Business development manager
  *
  * 2. ASM Field Force Manager:
  *    - Company: mirus
  *    - Email: reviewer.asm@mirus.com
  *    - Employee ID: MMS-REV-002
  *    - Password: Reviewer@2026!
- *    - Tier: ASM (Territory: Hyderabad Region)
+ *    - Role: Area sales manager
  *
  * 3. Complete functional dataset for reviewer.bdm@mirus.com:
  *    - Assigned Doctors (Cardiology, Diabetology, Orthopedics, etc.)
@@ -37,6 +37,7 @@ import mongoose from 'mongoose';
 import connectDB from '../config/db.js';
 import { runWithStore } from '../utils/tenantContext.js';
 import Company from '../models/Company.js';
+import { DEV_PERSONA_ROLE_NAMES, ensureJobRoleId } from './lib/devJobRoles.js';
 import User from '../models/User.js';
 import Doctor from '../models/Doctor.js';
 import DailyCallReport from '../models/DailyCallReport.js';
@@ -78,9 +79,9 @@ async function getOrCreateCompany() {
   return company;
 }
 
-async function upsertUser(company, { email, role, firstName, lastName, gender, tier, territory, employeeId, reportingManagerId }) {
+async function upsertUser(company, { email, role, firstName, lastName, gender, persona, employeeId, reportingManagerId }) {
   let user = await User.findOne({ companyId: company._id, email });
-  const fieldForce = tier ? { tier, territory: territory || null } : { tier: null, territory: null };
+  const jobRole = persona ? await ensureJobRoleId(company._id, DEV_PERSONA_ROLE_NAMES[persona]) : null;
 
   if (user) {
     user.password = REVIEWER_PASSWORD;
@@ -88,7 +89,7 @@ async function upsertUser(company, { email, role, firstName, lastName, gender, t
     user.role = role;
     user.employeeDetails = user.employeeDetails || {};
     user.employeeDetails.reportingManagerId = reportingManagerId || null;
-    user.employeeDetails.fieldForce = fieldForce;
+    user.employeeDetails.jobRole = jobRole;
     if (employeeId) user.employeeDetails.employeeId = employeeId;
     await user.save();
     console.log(`🔄 Updated reviewer account: ${email}`);
@@ -119,9 +120,9 @@ async function upsertUser(company, { email, role, firstName, lastName, gender, t
     employeeDetails: {
       employeeId,
       department: 'Field Force',
-      designation: tier === 'BDM' ? 'Business Development Manager' : 'Area Sales Manager',
+      designation: persona === 'BDM' ? 'Business Development Manager' : 'Area Sales Manager',
       reportingManagerId: reportingManagerId || null,
-      fieldForce
+      jobRole
     }
   });
 
@@ -147,8 +148,7 @@ export async function seedReviewerData() {
     firstName: 'Sam',
     lastName: 'Manager',
     gender: 'Female',
-    tier: 'ASM',
-    territory: 'Hyderabad Region',
+    persona: 'ASM',
     employeeId: 'DEV-REV-002'
   });
 
@@ -159,8 +159,7 @@ export async function seedReviewerData() {
     firstName: 'Alex',
     lastName: 'Reviewer',
     gender: 'Male',
-    tier: 'BDM',
-    territory: 'Banjara Hills - Hyderabad',
+    persona: 'BDM',
     employeeId: 'DEV-REV-001',
     reportingManagerId: asm._id
   });

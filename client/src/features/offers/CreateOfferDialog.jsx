@@ -17,7 +17,7 @@ import { listTemplates } from '../../api/salary.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
 const blank = {
-  candidateEmail: '', fullName: '', position: '', department: '',
+  candidateEmail: '', fullName: '', position: '', jobRoleId: '', department: '',
   joiningDate: '', offerDate: '', templateId: '', annualCTC: '',
   phone: '', city: '', location: ''
 };
@@ -104,8 +104,9 @@ export default function CreateOfferDialog({ open, onClose, onSaved }) {
               <TextField label="City / Address" value={form.city} onChange={set('city')} fullWidth placeholder="e.g. Hyderabad, PIN Code: 500090" />
               <JobRoleSelect
                 label="Position"
-                value={form.position}
-                onChange={(v) => setForm({ ...form, position: v })}
+                byId
+                value={form.jobRoleId}
+                onChange={(id, role) => setForm({ ...form, jobRoleId: id, position: role?.name || '' })}
                 required
                 size="medium"
               />

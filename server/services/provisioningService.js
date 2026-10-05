@@ -1,3 +1,4 @@
+import { resolveJobRoleOrThrow, assignJobRoleToUser } from './jobRoleAssignment.js';
 import crypto from 'node:crypto';
 import User from '../models/User.js';
 import { sendCredentials } from './emailService.js';
@@ -69,8 +70,19 @@ export const provisionEmployee = async (user, { offer } = {}) => {
     user.employeeDetails.employeeId = await generateEmployeeId(user.companyId);
   }
   if (offer) {
-    user.employeeDetails.designation = offer.position;
+    // The offer's role (jobRoleId, or for offers created before JobRoles were linked, its position
+    // name) must be an EXISTING active JobRole of this company: designation and employeeDetails.jobRole
+    // are written together. Fails with a clear error instead of saving only a designation.
+    const role = await resolveJobRoleOrThrow({ companyId: user.companyId, jobRoleId: offer.jobRoleId, name: offer.position });
+    assignJobRoleToUser(user, role);
     user.employeeDetails.department = offer.department;
+    // The offer's Job Location is a SNAPSHOT on the offer; the employee's current work location is
+    // employeeDetails.workLocation. Copy it at onboarding only when the offer has one and the employee has
+    // none yet — never invent a location, and never overwrite one an admin already set.
+    const offerLocation = String(offer.location ?? '').trim();
+    if (offerLocation && !String(user.employeeDetails.workLocation ?? '').trim()) {
+      user.employeeDetails.workLocation = offerLocation;
+    }
     user.employeeDetails.dateOfJoining = offer.joiningDate;
   }
 

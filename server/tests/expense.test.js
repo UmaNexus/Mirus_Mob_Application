@@ -21,10 +21,10 @@ const setupAsmBdm = async () => {
   setupCounter += 1;
   const n = setupCounter;
   const company = await getDefaultCompany();
-  const { agent: asmAgent, user: asm } = await authAgent(app, { email: `asm_${n}@xyz.com`, employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: `asm_${n}@xyz.com`, employeeDetails: { fieldRole: 'ASM' } });
   const bdm = await createUser({
     companyId: company._id, email: `bdm_${n}@xyz.com`, password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
   const bdmAgent = await loginAs(company, bdm);
   return { company, asmAgent, asm, bdm, bdmAgent };
@@ -36,7 +36,7 @@ test('unauthenticated request is rejected', async () => {
   assert.equal((await request(app).get('/api/expenses')).status, 401);
 });
 
-test('an employee with no fieldForce tier is denied', async () => {
+test('an employee with no field-force role is denied', async () => {
   const { agent } = await authAgent(app, { email: 'plain@xyz.com', role: 'employee' });
   assert.equal((await agent.get('/api/expenses')).status, 403);
 });
@@ -198,7 +198,7 @@ test('an admin in one company never sees expenses from another company via /team
   const companyA = await createCompany({ slug: 'exp-alpha' });
   const companyB = await createCompany({ slug: 'exp-beta' });
   const { agent: adminA } = await authAgent(app, { company: companyA, email: 'admin-a@xyz.com', role: 'admin' });
-  const bdmB = await createUser({ companyId: companyB._id, email: 'bdm-b@xyz.com', password: 'Password1', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  const bdmB = await createUser({ companyId: companyB._id, email: 'bdm-b@xyz.com', password: 'Password1', employeeDetails: { fieldRole: 'BDM' } });
   const bdmBAgent = await loginAs(companyB, bdmB);
   await bdmBAgent.post('/api/expenses').send({ category: 'Food', date: '2026-08-12', amount: 400 });
 

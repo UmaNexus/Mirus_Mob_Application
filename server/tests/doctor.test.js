@@ -46,14 +46,14 @@ test('unauthenticated request is rejected', async () => {
   assert.equal((await request(app).get('/api/doctors/mine')).status, 401);
 });
 
-test('an employee with no fieldForce tier is denied both BDM and manager endpoints', async () => {
+test('an employee with no field-force role is denied both BDM and manager endpoints', async () => {
   const { agent } = await authAgent(app, { email: 'plain@xyz.com', role: 'employee' });
   assert.equal((await agent.get('/api/doctors/mine')).status, 403);
   assert.equal((await agent.get('/api/doctors')).status, 403);
 });
 
 test('a BDM cannot reach the ASM+ management endpoints', async () => {
-  const { agent } = await authAgent(app, { email: 'bdm@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  const { agent } = await authAgent(app, { email: 'bdm@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
   assert.equal((await agent.get('/api/doctors')).status, 403);
   assert.equal((await agent.post('/api/doctors').send({ name: 'Dr. X' })).status, 403);
 });
@@ -62,12 +62,12 @@ test('a BDM cannot reach the ASM+ management endpoints', async () => {
 
 test('a BDM sees only doctors assigned to them via /mine', async () => {
   const company = await getDefaultCompany();
-  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   const bdm = await createUser({
     companyId: company._id, email: 'bdm2@xyz.com', password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
-  const otherBdm = await createUser({ companyId: company._id, email: 'other-bdm@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  const otherBdm = await createUser({ companyId: company._id, email: 'other-bdm@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
 
   const bdmAgent = request.agent(app);
   const login = await bdmAgent.post('/api/auth/login').send({ companySlug: company.slug, email: bdm.email, password: 'Password1' });
@@ -84,10 +84,10 @@ test('a BDM sees only doctors assigned to them via /mine', async () => {
 
 test('GET /api/doctors/mine no longer computes plannedVisitsThisMonth — MTP plans an area, never a doctor, so there is nothing per-doctor to sum', async () => {
   const company = await getDefaultCompany();
-  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-stats@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-stats@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   const bdm = await createUser({
     companyId: company._id, email: 'bdm-stats@xyz.com', password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
   const bdmAgent = request.agent(app);
   await bdmAgent.post('/api/auth/login').send({ companySlug: company.slug, email: bdm.email, password: 'Password1' });
@@ -101,7 +101,7 @@ test('GET /api/doctors/mine no longer computes plannedVisitsThisMonth — MTP pl
 // ---------- ASM+ create / assignment authorization ----------
 
 test('an ASM can create an unassigned doctor', async () => {
-  const { agent: asmAgent } = await authAgent(app, { email: 'asm2@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent } = await authAgent(app, { email: 'asm2@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   const res = await asmAgent.post('/api/doctors').send({ name: 'Dr. Unassigned' });
   assert.equal(res.status, 201);
   assert.equal(res.body.doctor.assignedTo, null);
@@ -109,10 +109,10 @@ test('an ASM can create an unassigned doctor', async () => {
 
 test('an ASM can assign a doctor to their own reporting BDM', async () => {
   const company = await getDefaultCompany();
-  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm3@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm3@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   const bdm = await createUser({
     companyId: company._id, email: 'bdm3@xyz.com',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
 
   const res = await asmAgent.post('/api/doctors').send({ name: 'Dr. Owned', assignedTo: String(bdm._id) });
@@ -122,8 +122,8 @@ test('an ASM can assign a doctor to their own reporting BDM', async () => {
 
 test('an ASM cannot assign a doctor to a BDM outside their reporting subtree', async () => {
   const company = await getDefaultCompany();
-  const { agent: asmAgent } = await authAgent(app, { email: 'asm4@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
-  const unrelatedBdm = await createUser({ companyId: company._id, email: 'unrelated-bdm@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  const { agent: asmAgent } = await authAgent(app, { email: 'asm4@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
+  const unrelatedBdm = await createUser({ companyId: company._id, email: 'unrelated-bdm@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
 
   const res = await asmAgent.post('/api/doctors').send({ name: 'Dr. Blocked', assignedTo: String(unrelatedBdm._id) });
   assert.equal(res.status, 403);
@@ -133,9 +133,9 @@ test('an ASM cannot assign a doctor to a BDM outside their reporting subtree', a
 
 test('an ASM can reassign a doctor between two of their own BDMs, and it is audit-logged', async () => {
   const company = await getDefaultCompany();
-  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm5@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
-  const bdmA = await createUser({ companyId: company._id, email: 'bdmA@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id } });
-  const bdmB = await createUser({ companyId: company._id, email: 'bdmB@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm5@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
+  const bdmA = await createUser({ companyId: company._id, email: 'bdmA@xyz.com', employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id } });
+  const bdmB = await createUser({ companyId: company._id, email: 'bdmB@xyz.com', employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id } });
 
   const created = await asmAgent.post('/api/doctors').send({ name: 'Dr. Reassign', assignedTo: String(bdmA._id) });
   const doctorId = created.body.doctor._id;
@@ -150,11 +150,11 @@ test('an ASM can reassign a doctor between two of their own BDMs, and it is audi
 
 test('an ASM cannot reassign a doctor currently owned by a BDM outside their subtree', async () => {
   const company = await getDefaultCompany();
-  const { agent: otherAsmAgent, user: otherAsm } = await authAgent(app, { email: 'other-asm@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
-  const foreignBdm = await createUser({ companyId: company._id, email: 'foreign-bdm@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: otherAsm._id } });
+  const { agent: otherAsmAgent, user: otherAsm } = await authAgent(app, { email: 'other-asm@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
+  const foreignBdm = await createUser({ companyId: company._id, email: 'foreign-bdm@xyz.com', employeeDetails: { fieldRole: 'BDM', reportingManagerId: otherAsm._id } });
   const created = await otherAsmAgent.post('/api/doctors').send({ name: 'Dr. Foreign', assignedTo: String(foreignBdm._id) });
 
-  const { agent: asmAgent } = await authAgent(app, { email: 'asm6@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent } = await authAgent(app, { email: 'asm6@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   const res = await asmAgent.patch(`/api/doctors/${created.body.doctor._id}`).send({ name: 'Hijacked' });
   assert.equal(res.status, 403);
 });
@@ -180,14 +180,14 @@ test('doctors from another company never appear in this company\'s admin listing
 
 test('CSV import creates authorized rows and reports unauthorized rows as failed, not aborting the batch', async () => {
   const company = await getDefaultCompany();
-  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm7@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm7@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   const ownBdm = await createUser({
     companyId: company._id, email: 'import-own-bdm@xyz.com',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id, employeeId: 'MMS-OWN' }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id, employeeId: 'MMS-OWN' }
   });
   const foreignBdm = await createUser({
     companyId: company._id, email: 'import-foreign-bdm@xyz.com',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, employeeId: 'MMS-FOREIGN' }
+    employeeDetails: { fieldRole: 'BDM', employeeId: 'MMS-FOREIGN' }
   });
 
   const buffer = await buildRoster([
@@ -205,7 +205,7 @@ test('CSV import creates authorized rows and reports unauthorized rows as failed
 // ---------- Import preview/confirm ----------
 
 test('preview reports per-row status without writing anything to the database', async () => {
-  const { agent: asmAgent } = await authAgent(app, { email: 'asm-preview@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent } = await authAgent(app, { email: 'asm-preview@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
 
   const buffer = await buildRoster([
     ['', 'Cardiologist', 'Pune', '9999999999', ''], // missing name -> error
@@ -224,8 +224,8 @@ test('preview reports per-row status without writing anything to the database', 
 
 test('preview flags a BDM identifier outside the caller\'s reporting hierarchy', async () => {
   const company = await getDefaultCompany();
-  const { agent: asmAgent } = await authAgent(app, { email: 'asm-preview3@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
-  const foreignBdm = await createUser({ companyId: company._id, email: 'foreign-preview-bdm@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' }, employeeId: 'PREV-FOREIGN' } });
+  const { agent: asmAgent } = await authAgent(app, { email: 'asm-preview3@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
+  const foreignBdm = await createUser({ companyId: company._id, email: 'foreign-preview-bdm@xyz.com', employeeDetails: { fieldRole: 'BDM', employeeId: 'PREV-FOREIGN' } });
 
   const buffer = await buildRoster([['Dr. Blocked', 'Cardiologist', 'Pune', '', 'PREV-FOREIGN']]);
   const res = await asmAgent.post('/api/doctors/import/preview').attach('roster', buffer, 'doctors.xlsx');
@@ -235,7 +235,7 @@ test('preview flags a BDM identifier outside the caller\'s reporting hierarchy',
 });
 
 test('preview flags an existing doctor as "update", not a duplicate create', async () => {
-  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-preview4@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-preview4@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   await asmAgent.post('/api/doctors').send({ name: 'Dr. Existing' });
 
   const buffer = await buildRoster([['Dr. Existing', 'Cardiologist', 'Pune', '', '']]);
@@ -247,12 +247,12 @@ test('preview flags an existing doctor as "update", not a duplicate create', asy
 
 test('confirm creates ok rows, updates warning rows, and re-validates authorization server-side (never trusting client-supplied resolvedAssignedTo)', async () => {
   const company = await getDefaultCompany();
-  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-confirm@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-confirm@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   const ownBdm = await createUser({
     companyId: company._id, email: 'confirm-own-bdm@xyz.com',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id, employeeId: 'CONF-OWN' }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id, employeeId: 'CONF-OWN' }
   });
-  const foreignBdm = await createUser({ companyId: company._id, email: 'confirm-foreign-bdm@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' }, employeeId: 'CONF-FOREIGN' } });
+  const foreignBdm = await createUser({ companyId: company._id, email: 'confirm-foreign-bdm@xyz.com', employeeDetails: { fieldRole: 'BDM', employeeId: 'CONF-FOREIGN' } });
   const existing = await asmAgent.post('/api/doctors').send({ name: 'Dr. ConfirmUpdate' });
 
   const res = await asmAgent.post('/api/doctors/import/confirm').send({
@@ -282,10 +282,10 @@ test('confirm creates ok rows, updates warning rows, and re-validates authorizat
 
 test('the official column headers (row 2, with a blank row 1) are recognized end to end, including DOB/DOA', async () => {
   const company = await getDefaultCompany();
-  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-official@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-official@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   await createUser({
     companyId: company._id, email: 'official-bdm@xyz.com',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id, employeeId: 'OFF-001' }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id, employeeId: 'OFF-001' }
   });
 
   const buffer = await buildOfficialRoster([[
@@ -319,7 +319,7 @@ test('the official column headers (row 2, with a blank row 1) are recognized end
 // ---------- BDM Employee ID resolution / bulk assignment / invalid BDM ----------
 
 test('an Employee ID that does not belong to any user is reported as an invalid BDM, not silently skipped', async () => {
-  const { agent: asmAgent } = await authAgent(app, { email: 'asm-invalidbdm@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent } = await authAgent(app, { email: 'asm-invalidbdm@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   const buffer = await buildRoster([['Dr. NoSuchBdm', 'Cardiologist', 'Pune', '', 'NO-SUCH-ID']]);
   const res = await asmAgent.post('/api/doctors/import/preview').attach('roster', buffer, 'doctors.xlsx');
   assert.equal(res.status, 200);
@@ -329,9 +329,9 @@ test('an Employee ID that does not belong to any user is reported as an invalid 
 
 test('bulk assignment: one upload assigns multiple doctors across multiple BDMs in the caller\'s own hierarchy', async () => {
   const company = await getDefaultCompany();
-  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-bulk@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
-  const bdmA = await createUser({ companyId: company._id, email: 'bulk-bdm-a@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id, employeeId: 'BULK-A' } });
-  const bdmB = await createUser({ companyId: company._id, email: 'bulk-bdm-b@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id, employeeId: 'BULK-B' } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-bulk@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
+  const bdmA = await createUser({ companyId: company._id, email: 'bulk-bdm-a@xyz.com', employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id, employeeId: 'BULK-A' } });
+  const bdmB = await createUser({ companyId: company._id, email: 'bulk-bdm-b@xyz.com', employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id, employeeId: 'BULK-B' } });
 
   const buffer = await buildRoster([
     ['Dr. BulkOne', 'Cardiologist', 'Pune', '', 'BULK-A'],
@@ -354,8 +354,8 @@ test('bulk assignment: one upload assigns multiple doctors across multiple BDMs 
 
 test('two rows for the same doctor (same name+area) in one file: the second is flagged "duplicate", and confirming both never creates two doctors', async () => {
   const company = await getDefaultCompany();
-  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-dup@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
-  const bdm = await createUser({ companyId: company._id, email: 'dup-bdm@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id, employeeId: 'DUP-1' } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-dup@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
+  const bdm = await createUser({ companyId: company._id, email: 'dup-bdm@xyz.com', employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id, employeeId: 'DUP-1' } });
 
   const buffer = await buildRoster([
     ['Dr. Duplicate', 'Cardiologist', 'Pune', '', ''],
@@ -381,8 +381,8 @@ test('two rows for the same doctor (same name+area) in one file: the second is f
 
 test('re-uploading and re-confirming the exact same file a second time is a no-op create — it only updates the same doctor again', async () => {
   const company = await getDefaultCompany();
-  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-idempotent@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
-  await createUser({ companyId: company._id, email: 'idempotent-bdm@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id, employeeId: 'IDEM-1' } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-idempotent@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
+  await createUser({ companyId: company._id, email: 'idempotent-bdm@xyz.com', employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id, employeeId: 'IDEM-1' } });
 
   const buffer = await buildRoster([['Dr. Idempotent', 'Cardiologist', 'Pune', '', 'IDEM-1']]);
 
@@ -410,7 +410,7 @@ test('a doctor with the same name in another tenant is never matched — import 
   const { agent: adminBAgent } = await authAgent(app, { company: companyB, email: 'admin-b-import@xyz.com', role: 'admin' });
   await adminBAgent.post('/api/doctors').send({ name: 'Dr. CrossTenant' });
 
-  const { agent: asmAAgent } = await authAgent(app, { company: companyA, email: 'asm-a-import@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAAgent } = await authAgent(app, { company: companyA, email: 'asm-a-import@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   const buffer = await buildRoster([['Dr. CrossTenant', 'Cardiologist', 'Pune', '', '']]);
   const preview = await asmAAgent.post('/api/doctors/import/preview').attach('roster', buffer, 'doctors.xlsx');
   assert.equal(preview.body.rows[0].status, 'ok', 'the same-named doctor in another tenant must never be treated as an existing match');
@@ -429,10 +429,10 @@ test('a doctor with the same name in another tenant is never matched — import 
 
 test('doctor alerts surface only the caller\'s own assigned doctors with an upcoming birthday', async () => {
   const company = await getDefaultCompany();
-  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-alerts@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const { agent: asmAgent, user: asm } = await authAgent(app, { email: 'asm-alerts@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   const bdm = await createUser({
     companyId: company._id, email: 'bdm-alerts@xyz.com', password: 'Password1',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
   const bdmAgent = request.agent(app);
   const login = await bdmAgent.post('/api/auth/login').send({ companySlug: company.slug, email: bdm.email, password: 'Password1' });

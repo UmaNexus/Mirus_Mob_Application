@@ -5,38 +5,37 @@ import asyncHandler from '../utils/asyncHandler.js';
 import { logActivity } from '../services/activityService.js';
 import { withOptionalTransaction } from '../utils/withOptionalTransaction.js';
 import { buildReportingSubtreeIds } from '../middleware/fieldForceAuth.js';
-import { FIELD_TIERS, MANAGER_TIERS } from '../config/fieldForce.js';
+import { findInvalidRelationships } from '../services/hierarchyGuard.js';
+import { JOB_ROLE_POPULATE, roleOf, publicJobRole, hasDirectReports } from '../services/fieldIdentity.js';
 import { PERMISSIONS, ROLE_PERMISSIONS } from '../config/permissions.js';
 import { dispatchNotification } from '../services/notificationService.js';
 
 const HIERARCHY_SELECT = 'personalDetails.firstName personalDetails.lastName email role isActive '
   + 'employeeDetails.employeeId employeeDetails.department employeeDetails.designation '
-  + 'employeeDetails.fieldForce employeeDetails.reportingManagerId';
+  + 'employeeDetails.jobRole employeeDetails.reportingManagerId employeeDetails.workLocation';
 
 const displayName = (u) => `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim() || u.email;
 
 /**
  * GET /api/admin/hierarchy — the whole organization tree for the Admin
- * Dashboard (Admin → NSM → ZSM → RSM → ASM → BDM), built from the SAME
+ * Dashboard (Admin → job-role holders), built from the SAME
  * `employeeDetails.reportingManagerId` links every other field-force feature
  * already reads/writes — no separate hierarchy collection.
  *
  * HRMS onboarding and field-force hierarchy assignment are deliberately
  * separate concerns (onboarding creates the User; an Admin separately opts
  * them into this hierarchy) — so eligibility here is NEVER *only* "already
- * has a fieldForce.tier". That would silently hide every freshly onboarded
- * employee (tier/reportingManagerId both null) from the Admin Dashboard
+ * has a jobRole". That would silently hide every freshly onboarded
+ * employee (jobRole/reportingManagerId both null) from the Admin Dashboard
  * entirely, with no way to ever assign them one. Eligibility is therefore
  * the union of two independent signals:
- *  - already has a real fieldForce.tier — included unconditionally,
- *    regardless of isActive/employeeId, so an existing assigned user's
- *    behavior never changes (this was the *entire* original filter);
+ *  - already holds a JobRole — included unconditionally,
+ *    regardless of isActive/employeeId;
  *  - OR is a real, fully provisioned employee eligible for FUTURE
  *    assignment — the same "employeesOnly" signal `listUsers` already uses:
- *    role 'employee' (field reps are never role admin/hr — see
- *    config/fieldForce.js), active, with a real employeeId (onboarding
+ *    role 'employee', active, with a real employeeId (onboarding
  *    complete, not still a draft candidate).
- * `fieldForce.tier` is never inferred from `designation`/`department` —
+ * A JobRole is never inferred from `designation`/`department` —
  * those are shown for context only. Admin/superadmin are always included
  * for the tree's root.
  *
@@ -48,7 +47,7 @@ export const getHierarchy = asyncHandler(async (req, res) => {
     deletedAt: null,
     $or: [
       { role: { $in: ['admin', 'superadmin'] } },
-      { 'employeeDetails.fieldForce.tier': { $in: FIELD_TIERS } },
+      { 'employeeDetails.jobRole': { $ne: null } },
       {
         role: 'employee',
         isActive: true,
@@ -57,10 +56,13 @@ export const getHierarchy = asyncHandler(async (req, res) => {
     ]
   })
     .select(HIERARCHY_SELECT)
+    .populate(JOB_ROLE_POPULATE)
     .sort({ 'personalDetails.firstName': 1 })
     .lean();
 
-  const byId = new Map(users.map((u) => [String(u._id), { ...u, children: [] }]));
+  // Every node carries its resolved role (JobRole name) and a public {id,name} jobRole —
+  // never an error when absent.
+  const byId = new Map(users.map((u) => [String(u._id), { ...u, roleName: roleOf(u).name, jobRole: publicJobRole(u), children: [] }]));
   const roots = [];
   const unassigned = [];
 
@@ -69,7 +71,7 @@ export const getHierarchy = asyncHandler(async (req, res) => {
       roots.push(node);
       continue;
     }
-    if (!node.employeeDetails?.fieldForce?.tier) {
+    if (!roleOf(node).hasJobRole) {
       // Onboarded, but an Admin hasn't opted them into the field-force
       // hierarchy yet — never inferred from designation/department.
       unassigned.push(node);
@@ -81,21 +83,33 @@ export const getHierarchy = asyncHandler(async (req, res) => {
     }
   }
 
-  // Anyone with a real field-force tier whose reporting chain doesn't
+  // Anyone holding a JobRole whose reporting chain doesn't
   // resolve up to an Admin in this same set (no manager on file yet, or one
   // pointing outside this filtered list) — surfaced separately so the Admin
   // Dashboard can flag it for correction instead of silently hiding a real
   // user or guessing where to attach them. Distinct from `unassigned` above
-  // — this is "has a tier but a broken chain", not "never assigned a tier".
+  // — this is "has a role but a broken chain", not "never assigned a role".
   const attached = new Set();
   const collect = (node) => { attached.add(String(node._id)); node.children.forEach(collect); };
   roots.forEach(collect);
-  const unattached = users.filter((u) => {
-    const id = String(u._id);
-    return u.employeeDetails?.fieldForce?.tier && !attached.has(id) && u.role !== 'admin' && u.role !== 'superadmin';
-  });
+  const unattached = users
+    .filter((u) => {
+      const id = String(u._id);
+      return roleOf(u).hasJobRole && !attached.has(id) && u.role !== 'admin' && u.role !== 'superadmin';
+    })
+    // Same role fields as every tree node, so the UI shows the real JobRole even with no manager.
+    .map((u) => ({ ...u, roleName: roleOf(u).name, jobRole: publicJobRole(u) }));
 
-  res.status(200).json({ success: true, data: { roots, unassigned, unattached } });
+  // READ-ONLY audit: stored relationships that break the hierarchy rule. Nothing is rewritten.
+  const invalidRelationships = findInvalidRelationships(users).map((r) => ({
+    ...r,
+    name: displayName(byId.get(r.userId) || {}),
+    managerName: displayName(byId.get(r.managerId) || {})
+  }));
+  const invalidIds = new Set(invalidRelationships.map((r) => r.userId));
+  byId.forEach((node, id) => { if (invalidIds.has(id)) node.hierarchyIssue = invalidRelationships.find((r) => r.userId === id); });
+
+  res.status(200).json({ success: true, data: { roots, unassigned, unattached, invalidRelationships } });
 });
 
 /**
@@ -122,10 +136,10 @@ export const getPermissionsCatalog = asyncHandler(async (req, res) => {
  * business record keeps referencing its real original `userId`/owner
  * untouched, since this only ever updates the reporting-manager link.
  *
- * `newManagerId` must already hold the exact same field-force tier as
- * `oldManagerId` — replacing a position means someone already sized for
- * that position takes it over; promoting/re-tiering someone is a separate,
- * explicit role-assignment action (PUT /api/users/:id) done beforehand.
+ * `newManagerId` must already hold the exact same JobRole as `oldManagerId` —
+ * replacing a position means someone already in that role takes it over;
+ * changing someone's role is a separate, explicit role-assignment action
+ * (PUT /api/users/:id with `jobRoleId`) done beforehand.
  *
  * Runs inside a transaction when the MongoDB deployment supports one, so
  * the organization can never be observed half-reparented.
@@ -141,19 +155,21 @@ export const replaceManager = asyncHandler(async (req, res) => {
 
   const result = await withOptionalTransaction(async (session) => {
     const [oldManager, newManager] = await Promise.all([
-      User.findById(oldManagerId).select('personalDetails employeeDetails.fieldForce role deletedAt').session(session),
-      User.findById(newManagerId).select('personalDetails employeeDetails.fieldForce role deletedAt').session(session)
+      User.findById(oldManagerId).select('personalDetails employeeDetails.jobRole role deletedAt').populate(JOB_ROLE_POPULATE).session(session),
+      User.findById(newManagerId).select('personalDetails employeeDetails.jobRole role deletedAt').populate(JOB_ROLE_POPULATE).session(session)
     ]);
     if (!oldManager || oldManager.deletedAt) throw new ApiError(404, 'Manager being replaced was not found');
     if (!newManager || newManager.deletedAt) throw new ApiError(404, 'Replacement manager was not found');
 
-    const oldTier = oldManager.employeeDetails?.fieldForce?.tier;
-    const newTier = newManager.employeeDetails?.fieldForce?.tier;
-    if (!oldTier || !MANAGER_TIERS.includes(oldTier)) {
-      throw new ApiError(400, 'Only an ASM, RSM, ZSM, or NSM position can be replaced');
+    const oldRole = roleOf(oldManager);
+    const newRole = roleOf(newManager);
+    // The manager position is whatever the real reporting graph says (someone with
+    // direct reports), and the replacement must hold the SAME JobRole.
+    if (!oldRole.hasJobRole || !(await hasDirectReports(oldManagerId))) {
+      throw new ApiError(400, 'Only a manager position (someone with direct reports) can be replaced');
     }
-    if (newTier !== oldTier) {
-      throw new ApiError(400, `The replacement manager must already hold the "${oldTier}" tier (currently "${newTier || 'none'}") — assign the tier first, then replace`);
+    if (!newRole.hasJobRole || newRole.jobRoleId !== oldRole.jobRoleId) {
+      throw new ApiError(400, `The replacement manager must already hold the same role as the manager being replaced ("${oldRole.name}") — assign the role first, then replace`);
     }
 
     // The replacement must not already be a descendant of the position
@@ -166,7 +182,7 @@ export const replaceManager = asyncHandler(async (req, res) => {
     }
 
     const directReports = await User.find({ 'employeeDetails.reportingManagerId': oldManagerId })
-      .select('_id personalDetails employeeDetails.employeeId employeeDetails.fieldForce.tier')
+      .select('_id personalDetails employeeDetails.employeeId')
       .session(session);
 
     const updateResult = await User.updateMany(
@@ -179,16 +195,16 @@ export const replaceManager = asyncHandler(async (req, res) => {
       action: 'admin.hierarchy.replaceManager',
       entityType: 'User',
       entityId: newManagerId,
-      message: `${displayName(newManager)} replaced ${displayName(oldManager)} as ${oldTier} — ${updateResult.modifiedCount} direct report(s) re-parented`,
-      meta: { oldManagerId: String(oldManagerId), newManagerId: String(newManagerId), tier: oldTier, reparentedCount: updateResult.modifiedCount }
+      message: `${displayName(newManager)} replaced ${displayName(oldManager)} as ${oldRole.name} — ${updateResult.modifiedCount} direct report(s) re-parented`,
+      meta: { oldManagerId: String(oldManagerId), newManagerId: String(newManagerId), roleName: oldRole.name, reparentedCount: updateResult.modifiedCount }
     });
 
     return {
-      tier: oldTier,
+      roleName: oldRole.name,
       oldManager: { id: oldManager._id, name: displayName(oldManager) },
       newManager: { id: newManager._id, name: displayName(newManager) },
       reparentedCount: updateResult.modifiedCount,
-      reparented: directReports.map((u) => ({ id: u._id, name: displayName(u), employeeId: u.employeeDetails?.employeeId || null, tier: u.employeeDetails?.fieldForce?.tier || null }))
+      reparented: directReports.map((u) => ({ id: u._id, name: displayName(u), employeeId: u.employeeDetails?.employeeId || null }))
     };
   });
 

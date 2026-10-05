@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import request from 'supertest';
 import * as db from './helpers/testDb.js';
 import app from '../app.js';
-import { authAgent, createUser, createCompany, getDefaultCompany } from './helpers/factories.js';
+import { authAgent, createUser, createCompany, getDefaultCompany, getOrCreateJobRole } from './helpers/factories.js';
 
 before(async () => { await db.connect(); });
 after(async () => { await db.close(); });
@@ -11,12 +11,14 @@ beforeEach(async () => { await db.clear(); });
 
 // ---------- Schema backward compatibility ----------
 
-test('existing employee documents (no fieldForce) remain valid — no migration needed', async () => {
+test('HRMS users without a jobRole remain valid, and the schema has no fieldForce attribute', async () => {
   const user = await createUser({ email: 'plain@xyz.com' });
-  assert.equal(user.employeeDetails?.fieldForce?.tier ?? null, null);
-  // Re-fetch to make sure the optional sub-doc doesn't break reads either.
+  assert.equal(user.employeeDetails?.jobRole ?? null, null);
+  assert.equal(user.schema.path('employeeDetails.fieldForce'), undefined);
+  assert.equal(user.schema.path('employeeDetails.fieldForce.tier'), undefined);
+  // Re-fetch to make sure the optional field doesn't break reads either.
   const reloaded = await user.constructor.findById(user._id);
-  assert.equal(reloaded.employeeDetails?.fieldForce?.tier ?? null, null);
+  assert.equal(reloaded.employeeDetails?.jobRole ?? null, null);
 });
 
 // ---------- requireFieldTier / route-level authorization ----------
@@ -26,13 +28,13 @@ test('unauthenticated request to a field-force route is rejected', async () => {
   assert.equal(res.status, 401);
 });
 
-test('an employee with no fieldForce tier and no admin access is denied', async () => {
+test('an employee with no field-force role and no admin access is denied', async () => {
   const { agent } = await authAgent(app, { email: 'plain@xyz.com', role: 'employee' });
   const res = await agent.get('/api/field-force/team');
   assert.equal(res.status, 403);
 });
 
-test('HR role alone (no fieldForce tier) is denied field-force access', async () => {
+test('HR role alone (no field-force role) is denied field-force access', async () => {
   // HR has broad HRMS permissions but no FIELDOPS_MONITOR grant and no tier —
   // proves this is not a simple role check being satisfied by accident.
   const { agent } = await authAgent(app, { email: 'hr@xyz.com', role: 'hr' });
@@ -45,7 +47,7 @@ test('HR role alone (no fieldForce tier) is denied field-force access', async ()
 test('a BDM with no reports sees only themselves', async () => {
   const { agent, user } = await authAgent(app, {
     email: 'bdm@xyz.com',
-    employeeDetails: { fieldForce: { tier: 'BDM' } }
+    employeeDetails: { fieldRole: 'BDM' }
   });
   const res = await agent.get('/api/field-force/team');
   assert.equal(res.status, 200);
@@ -58,18 +60,18 @@ test('an ASM sees themselves plus their direct-report BDMs, but not unrelated BD
   const company = await getDefaultCompany();
   const { agent, user: asm } = await authAgent(app, {
     email: 'asm@xyz.com',
-    employeeDetails: { fieldForce: { tier: 'ASM' } }
+    employeeDetails: { fieldRole: 'ASM' }
   });
   const ownBdm = await createUser({
     companyId: company._id,
     email: 'own-bdm@xyz.com',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
-  const otherAsm = await createUser({ companyId: company._id, email: 'other-asm@xyz.com', employeeDetails: { fieldForce: { tier: 'ASM' } } });
+  const otherAsm = await createUser({ companyId: company._id, email: 'other-asm@xyz.com', employeeDetails: { fieldRole: 'ASM' } });
   await createUser({
     companyId: company._id,
     email: 'unrelated-bdm@xyz.com',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: otherAsm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: otherAsm._id }
   });
 
   const res = await agent.get('/api/field-force/team');
@@ -82,17 +84,17 @@ test('an RSM sees the full multi-level subtree: their ASMs and those ASMs\' BDMs
   const company = await getDefaultCompany();
   const { agent, user: rsm } = await authAgent(app, {
     email: 'rsm@xyz.com',
-    employeeDetails: { fieldForce: { tier: 'RSM' } }
+    employeeDetails: { fieldRole: 'RSM' }
   });
   const asm = await createUser({
     companyId: company._id,
     email: 'asm2@xyz.com',
-    employeeDetails: { fieldForce: { tier: 'ASM' }, reportingManagerId: rsm._id }
+    employeeDetails: { fieldRole: 'ASM', reportingManagerId: rsm._id }
   });
   const bdm = await createUser({
     companyId: company._id,
     email: 'bdm2@xyz.com',
-    employeeDetails: { fieldForce: { tier: 'BDM' }, reportingManagerId: asm._id }
+    employeeDetails: { fieldRole: 'BDM', reportingManagerId: asm._id }
   });
 
   const res = await agent.get('/api/field-force/team');
@@ -106,8 +108,8 @@ test('an RSM sees the full multi-level subtree: their ASMs and those ASMs\' BDMs
 test('a BDM in another company never appears in this company\'s admin field-force list', async () => {
   const companyA = await createCompany({ slug: 'alpha' });
   const companyB = await createCompany({ slug: 'beta' });
-  await createUser({ companyId: companyA._id, email: 'bdm-a@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
-  await createUser({ companyId: companyB._id, email: 'bdm-b@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  await createUser({ companyId: companyA._id, email: 'bdm-a@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
+  await createUser({ companyId: companyB._id, email: 'bdm-b@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
 
   const { agent: adminA } = await authAgent(app, { company: companyA, email: 'admin-a@xyz.com', role: 'admin' });
   const res = await adminA.get('/api/field-force/team');
@@ -119,11 +121,11 @@ test('a BDM in another company never appears in this company\'s admin field-forc
 
 // ---------- Admin company-wide access ----------
 
-test('admin (no fieldForce tier of their own) sees every field-force user company-wide, not a subtree', async () => {
+test('admin (no field-force role of their own) sees every field-force user company-wide, not a subtree', async () => {
   const company = await getDefaultCompany();
   const { agent: adminAgent } = await authAgent(app, { email: 'admin@xyz.com', role: 'admin' });
-  const nsm = await createUser({ companyId: company._id, email: 'nsm@xyz.com', employeeDetails: { fieldForce: { tier: 'NSM' } } });
-  const bdm = await createUser({ companyId: company._id, email: 'bdm3@xyz.com', employeeDetails: { fieldForce: { tier: 'BDM' } } });
+  const nsm = await createUser({ companyId: company._id, email: 'nsm@xyz.com', employeeDetails: { fieldRole: 'NSM' } });
+  const bdm = await createUser({ companyId: company._id, email: 'bdm3@xyz.com', employeeDetails: { fieldRole: 'BDM' } });
 
   const res = await adminAgent.get('/api/field-force/team');
   assert.equal(res.status, 200);
@@ -133,31 +135,32 @@ test('admin (no fieldForce tier of their own) sees every field-force user compan
   assert.ok(ids.includes(String(bdm._id)));
 });
 
-// ---------- Assigning a tier reuses the existing user-update endpoint ----------
+// ---------- Assigning a JobRole reuses the existing user-update endpoint ----------
 
-test('admin can assign a fieldForce tier via the existing PUT /api/users/:id endpoint', async () => {
-  const { agent: adminAgent } = await authAgent(app, { email: 'admin2@xyz.com', role: 'admin' });
+test('admin can assign a JobRole via the existing PUT /api/users/:id endpoint', async () => {
+  const { agent: adminAgent, company } = await authAgent(app, { email: 'admin2@xyz.com', role: 'admin' });
   const target = await createUser({ email: 'newbdm@xyz.com', role: 'employee' });
+  const role = await getOrCreateJobRole(company._id, 'Business development manager');
 
-  const res = await adminAgent.put(`/api/users/${target._id}`).send({ fieldForceTier: 'BDM', fieldForceTerritory: 'Pune Central' });
+  const res = await adminAgent.put(`/api/users/${target._id}`).send({ jobRoleId: String(role._id) });
   assert.equal(res.status, 200);
-  assert.equal(res.body.user.employeeDetails.fieldForce.tier, 'BDM');
-  assert.equal(res.body.user.employeeDetails.fieldForce.territory, 'Pune Central');
+  assert.equal(res.body.user.employeeDetails.jobRole.name, 'Business development manager');
 });
 
-test('an invalid fieldForce tier is rejected by validation before any write', async () => {
+test('an invalid jobRoleId is rejected by validation before any write', async () => {
   const { agent: adminAgent } = await authAgent(app, { email: 'admin3@xyz.com', role: 'admin' });
-  const target = await createUser({ email: 'bad-tier@xyz.com', role: 'employee' });
+  const target = await createUser({ email: 'bad-role@xyz.com', role: 'employee' });
 
-  const res = await adminAgent.put(`/api/users/${target._id}`).send({ fieldForceTier: 'REGIONAL_MANAGER' });
+  const res = await adminAgent.put(`/api/users/${target._id}`).send({ jobRoleId: 'not-an-id' });
   assert.equal(res.status, 400);
 });
 
-test('HR (not just admin) can also assign a fieldForce tier, consistent with existing USER_UPDATE grant', async () => {
-  const { agent: hrAgent } = await authAgent(app, { email: 'hr2@xyz.com', role: 'hr' });
+test('HR (not just admin) can also assign a JobRole, consistent with existing USER_UPDATE grant', async () => {
+  const { agent: hrAgent, company } = await authAgent(app, { email: 'hr2@xyz.com', role: 'hr' });
   const target = await createUser({ email: 'hr-assign@xyz.com', role: 'employee' });
+  const role = await getOrCreateJobRole(company._id, 'Area sales manager');
 
-  const res = await hrAgent.put(`/api/users/${target._id}`).send({ fieldForceTier: 'ASM' });
+  const res = await hrAgent.put(`/api/users/${target._id}`).send({ jobRoleId: String(role._id) });
   assert.equal(res.status, 200);
-  assert.equal(res.body.user.employeeDetails.fieldForce.tier, 'ASM');
+  assert.equal(res.body.user.employeeDetails.jobRole.name, 'Area sales manager');
 });

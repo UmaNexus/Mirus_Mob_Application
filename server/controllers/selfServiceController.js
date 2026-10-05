@@ -3,7 +3,7 @@ import SalarySlip from '../models/SalarySlip.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { formatINR } from '../utils/money.js';
 import { buildReportingChainAbove } from '../middleware/fieldForceAuth.js';
-import { FIELD_TIER_LABELS } from '../config/fieldForce.js';
+import { JOB_ROLE_POPULATE, publicJobRole, roleOf } from '../services/fieldIdentity.js';
 
 const MONTHS = ['', 'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
@@ -21,7 +21,8 @@ export const getHubOverview = asyncHandler(async (req, res) => {
     .populate({
       path: 'employeeDetails.reportingManagerId',
       select: 'personalDetails.firstName personalDetails.lastName employeeDetails.designation'
-    });
+    })
+    .populate(JOB_ROLE_POPULATE);
 
   const latest = await SalarySlip.findOne({ employeeId: user._id }).sort({ year: -1, month: -1 });
   const docs = user.uploadedDocuments || [];
@@ -38,7 +39,8 @@ export const getHubOverview = asyncHandler(async (req, res) => {
   const chainIds = [...(await buildReportingChainAbove(user._id))];
   const chainUsers = chainIds.length
     ? await User.find({ _id: { $in: chainIds } })
-      .select('personalDetails.firstName personalDetails.lastName email role employeeDetails.employeeId employeeDetails.designation employeeDetails.fieldForce.tier employeeDetails.fieldForce.territory')
+      .select('personalDetails.firstName personalDetails.lastName email role employeeDetails.employeeId employeeDetails.designation employeeDetails.jobRole')
+      .populate(JOB_ROLE_POPULATE)
       .lean()
     : [];
   const chainById = new Map(chainUsers.map((u) => [String(u._id), u]));
@@ -51,9 +53,8 @@ export const getHubOverview = asyncHandler(async (req, res) => {
       employeeId: u.employeeDetails?.employeeId || null,
       designation: u.employeeDetails?.designation || null,
       role: u.role,
-      fieldForceTier: u.employeeDetails?.fieldForce?.tier || null,
-      territory: u.employeeDetails?.fieldForce?.territory || null,
-      fieldForceTierLabel: u.employeeDetails?.fieldForce?.tier ? (FIELD_TIER_LABELS[u.employeeDetails.fieldForce.tier] || null) : null
+      jobRole: publicJobRole(u),
+      roleName: roleOf(u).name
     }));
 
   res.status(200).json({
@@ -65,7 +66,8 @@ export const getHubOverview = asyncHandler(async (req, res) => {
       employeeId: user.employeeDetails?.employeeId || null,
       department: user.employeeDetails?.department || null,
       status: user.isActive ? 'Active Employee' : 'Inactive',
-      fieldForceTier: user.employeeDetails?.fieldForce?.tier || null,
+      jobRole: publicJobRole(user),
+      roleName: roleOf(user).name,
       reportingManager: manager
         ? `${manager.personalDetails.firstName} ${manager.personalDetails.lastName}`
         : null,

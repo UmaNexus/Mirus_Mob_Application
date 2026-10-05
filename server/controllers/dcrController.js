@@ -249,7 +249,7 @@ export const listTeamDcr = asyncHandler(async (req, res) => {
 
   const dcrs = await DailyCallReport.find(filter)
     .populate('doctorId', DOCTOR_SELECT)
-    .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce employeeDetails.employeeId')
+    .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.employeeId')
     .sort({ dateKey: -1, visitTime: -1 })
     .limit(2000);
   res.status(200).json({ success: true, data: dcrs });

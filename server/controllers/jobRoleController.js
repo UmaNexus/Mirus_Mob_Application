@@ -1,21 +1,14 @@
 import mongoose from 'mongoose';
-import JobRole, { DEFAULT_JOB_ROLES } from '../models/JobRole.js';
+import JobRole from '../models/JobRole.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
-/** Ensure default job roles exist for the current tenant (idempotent). */
-export const ensureDefaultJobRoles = async () => {
-  const existing = await JobRole.countDocuments({ active: true });
-  if (existing > 0) return;
-  await JobRole.insertMany(
-    DEFAULT_JOB_ROLES.map((name, i) => ({ name, sortOrder: i, active: true })),
-    { ordered: false }
-  ).catch(() => { /* ignore duplicate races */ });
-};
-
-/** GET /api/job-roles — active roles by default; ?all=true includes inactive. */
+/**
+ * GET /api/job-roles — active roles by default; ?all=true includes inactive.
+ * READ-ONLY: this path never creates, renames or deletes JobRoles; it only lists the company's
+ * existing roles (the Admin role dropdown assigns one of these to `employeeDetails.jobRole`).
+ */
 export const listJobRoles = asyncHandler(async (req, res) => {
-  await ensureDefaultJobRoles();
   const filter = req.query.all === 'true' ? {} : { active: true };
   const data = await JobRole.find(filter).sort({ sortOrder: 1, name: 1 });
   res.status(200).json({ success: true, data });

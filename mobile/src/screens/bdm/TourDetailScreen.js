@@ -35,6 +35,7 @@ const HOLIDAY_COLOR = colors.danger;
 const HOLIDAY_SOFT = colors.dangerSoft;
 
 import useEntityHydration from '../../hooks/useEntityHydration';
+import { roleNameOf } from '../../navigation/roleHelpers';
 
 /**
  * One tour submission — a fresh draft ("+ Create New Tour", no route param)
@@ -98,7 +99,7 @@ export default function TourDetailScreen({ route, navigation }) {
   const approverOptions = useMemo(() => (approversQuery.data || []).map((a) => ({
     label: `${a.personalDetails?.firstName || ''} ${a.personalDetails?.lastName || ''}`.trim() || 'Unnamed',
     value: a._id,
-    sublabel: [a.employeeDetails?.fieldForce?.tier || (a.role === 'admin' || a.role === 'superadmin' ? 'Admin' : null), a.employeeDetails?.fieldForce?.territory].filter(Boolean).join(' · ')
+    sublabel: roleNameOf(a) || ''
   })), [approversQuery.data]);
   const [approverId, setApproverId] = useState(null);
 
@@ -242,7 +243,7 @@ export default function TourDetailScreen({ route, navigation }) {
         {plan?.approverId && (
           <Text style={styles.meta}>
             Approver: {`${plan.approverId.personalDetails?.firstName || ''} ${plan.approverId.personalDetails?.lastName || ''}`.trim() || 'Unnamed'}
-            {plan.approverId.employeeDetails?.fieldForce?.tier ? ` · ${plan.approverId.employeeDetails.fieldForce.tier}` : ''}
+            {roleNameOf(plan.approverId) ? ` · ${roleNameOf(plan.approverId)}` : ''}
           </Text>
         )}
         {plan?.decidedAt && <Text style={styles.meta}>Decided {new Date(plan.decidedAt).toLocaleString()}{plan.decisionNote ? ` — ${plan.decisionNote}` : ''}</Text>}

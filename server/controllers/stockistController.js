@@ -56,7 +56,7 @@ export const listTeamStockists = asyncHandler(async (req, res) => {
   }
 
   const stockists = await Stockist.find(filter)
-    .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce')
+    .populate('userId', 'personalDetails.firstName personalDetails.lastName')
     .sort({ name: 1 })
     .limit(2000);
   res.status(200).json({ success: true, data: stockists });

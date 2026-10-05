@@ -13,8 +13,8 @@
  * Creates exactly one company and three field-force test users so the
  * mobile app's BDM screens can be exercised against a live backend:
  *   - admin@sandbox.test / Sandbox123!  (role: admin)
- *   - asm@sandbox.test   / Sandbox123!  (fieldForce.tier: ASM)
- *   - bdm@sandbox.test   / Sandbox123!  (fieldForce.tier: BDM, reports to the ASM)
+ *   - asm@sandbox.test   / Sandbox123!  (JobRole: Area sales manager)
+ *   - bdm@sandbox.test   / Sandbox123!  (JobRole: Business development manager, reports to the ASM)
  * plus one doctor pre-assigned to the BDM so DCR/MTP screens have something
  * real to show immediately.
  *
@@ -22,6 +22,7 @@
  */
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
+import { DEV_PERSONA_ROLE_NAMES, ensureJobRoleId } from './lib/devJobRoles.js';
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'dev_sandbox_jwt_secret';
 process.env.NODE_ENV = 'development';
@@ -64,11 +65,11 @@ await runWithStore({ companyId: String(company._id), role: 'admin', authed: true
   const admin = await User.create(baseUser({ email: 'admin@sandbox.test', role: 'admin', firstName: 'Sandbox', lastName: 'Admin' }));
   const asm = await User.create(baseUser({
     email: 'asm@sandbox.test', role: 'employee', firstName: 'Amit', lastName: 'Shah',
-    employeeDetails: { fieldForce: { tier: 'ASM', territory: 'Pune Zone' } }
+    employeeDetails: { jobRole: await ensureJobRoleId(company._id, DEV_PERSONA_ROLE_NAMES.ASM) }
   }));
   const bdm = await User.create(baseUser({
     email: 'bdm@sandbox.test', role: 'employee', firstName: 'Priya', lastName: 'Desai',
-    employeeDetails: { fieldForce: { tier: 'BDM', territory: 'Pune Central' }, reportingManagerId: asm._id }
+    employeeDetails: { jobRole: await ensureJobRoleId(company._id, DEV_PERSONA_ROLE_NAMES.BDM), reportingManagerId: asm._id }
   }));
   await Doctor.create({
     companyId: company._id, name: 'Dr. Sanjay Mehta', speciality: 'Cardiologist', area: 'Koregaon Park',

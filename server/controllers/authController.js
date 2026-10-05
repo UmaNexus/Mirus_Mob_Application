@@ -4,6 +4,7 @@ import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { signToken, cookieOptions, COOKIE_NAME } from '../utils/jwt.js';
 import { setTenant } from '../utils/tenantContext.js';
+import { JOB_ROLE_POPULATE, fieldAccessFor } from '../services/fieldIdentity.js';
 
 /**
  * Strip sensitive/internal fields before returning a user to the client.
@@ -72,10 +73,16 @@ export const login = asyncHandler(async (req, res) => {
   // completely unchanged.
   const isMobileClient = req.headers['x-client'] === 'mobile';
 
+  // Resolve the JobRole name (company-pinned: a foreign/deleted id resolves to null)
+  // and the server-authoritative field access summary the mobile app routes on.
+  await user.populate({ ...JOB_ROLE_POPULATE, match: { companyId: user.companyId } });
+  const fieldAccess = await fieldAccessFor(user);
+
   res.status(200).json({
     success: true,
     message: 'Logged in successfully',
     user: toPublicUser(user),
+    fieldAccess,
     ...(isMobileClient ? { token } : {})
   });
 });
@@ -98,5 +105,6 @@ export const getCurrentUser = asyncHandler(async (req, res) => {
   const company = req.user.companyId
     ? await Company.findById(req.user.companyId).select('name slug branding status')
     : null;
-  res.status(200).json({ success: true, user: toPublicUser(req.user), company });
+  const fieldAccess = await fieldAccessFor(req.user);
+  res.status(200).json({ success: true, user: toPublicUser(req.user), fieldAccess, company });
 });

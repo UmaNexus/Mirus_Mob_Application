@@ -108,7 +108,7 @@ export const listTeamSecondarySales = asyncHandler(async (req, res) => {
   }
 
   const sales = await SecondarySale.find(filter)
-    .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce')
+    .populate('userId', 'personalDetails.firstName personalDetails.lastName')
     .populate('stockistId', 'name')
     .sort({ expiryDate: 1 })
     .limit(2000);

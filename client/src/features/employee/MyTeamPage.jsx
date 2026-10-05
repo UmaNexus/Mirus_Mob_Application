@@ -6,17 +6,18 @@ import Spinner from '../../components/ui/Spinner.jsx';
 import EmptyState from '../../components/ui/EmptyState.jsx';
 import useAsync from '../../hooks/useAsync.js';
 import { getHubOverview } from '../../api/selfService.js';
-import { FIELD_TIER_LABELS } from '../../config/fieldForce.js';
+import { roleLabelOf } from '../../config/roleLabel.js';
 
-/** "Admin"/"Superadmin" HRMS role, or the field-force tier label, or the free-text designation — whichever is the most specific real label available for this chain member. */
+/** "Admin"/"Superadmin" HRMS role, or the JobRole name, or the free-text designation — whichever is the most specific real label available for this chain member. */
 const roleLine = (member) => {
   if (member.role === 'admin' || member.role === 'superadmin') return 'Admin';
-  if (member.fieldForceTier) return FIELD_TIER_LABELS[member.fieldForceTier] || member.fieldForceTier;
+  const label = roleLabelOf({ roleName: member.roleName, jobRole: member.jobRole });
+  if (label) return label;
   return member.designation || 'Employee';
 };
 
 /** Same minimal card the page always used for the single reporting manager — reused per level so a longer chain doesn't change the page's look, just its length. */
-function ReportingCard({ label, name, subtitle, employeeId, territory }) {
+function ReportingCard({ label, name, subtitle, employeeId }) {
   return (
     <Card>
       <CardBody>
@@ -25,7 +26,7 @@ function ReportingCard({ label, name, subtitle, employeeId, territory }) {
           <Avatar name={name} size={48} />
           <div>
             <p className="font-semibold text-ink">{name}</p>
-            <p className="text-sm text-muted">{subtitle} {territory? `(${territory})` : null}</p>
+            <p className="text-sm text-muted">{subtitle}</p>
             {employeeId && <p className="text-xs text-muted">{employeeId}</p>}
           </div>
         </div>
@@ -60,7 +61,6 @@ export default function MyTeamPage() {
                 name={member.name}
                 subtitle={roleLine(member)}
                 employeeId={member.employeeId}
-                territory={member.territory}
               />
             ))
           )}

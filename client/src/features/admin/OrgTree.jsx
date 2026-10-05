@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ChevronDown, ChevronRight, CornerDownRight, Pencil, Repeat, TriangleAlert, UserPlus } from 'lucide-react';
 import { Card } from '../../components/ui/Card.jsx';
 import StatusBadge from '../../components/ui/StatusBadge.jsx';
-import { MANAGER_TIERS } from '../../config/fieldForce.js';
+import { roleLabelOf } from '../../config/roleLabel.js';
 import { fullName } from '../../config/constants.js';
 import AssignRoleDialog from './AssignRoleDialog.jsx';
 import ReplaceManagerDialog from './ReplaceManagerDialog.jsx';
@@ -14,17 +14,16 @@ const initials = (u) => {
 };
 
 const roleLabel = (u) => {
-  if (u.role === 'admin' || u.role === 'superadmin') return 'Admin';
-  return u.employeeDetails?.fieldForce?.tier || 'No tier';
+  return roleLabelOf(u) || 'No role';
 };
 
 function TreeNode({ node, isRoot, collapsed, onToggle, onAssign, onReplace }) {
   const hasChildren = node.children?.length > 0;
   const isCollapsed = collapsed.has(String(node._id));
-  const tier = node.employeeDetails?.fieldForce?.tier;
-  const isManagerTier = MANAGER_TIERS.includes(tier);
   const isAdminNode = node.role === 'admin' || node.role === 'superadmin';
   const directReportCount = node.children?.length || 0;
+  // A manager is whoever actually has direct reports (reportingManagerId is the only hierarchy).
+  const isManagerTier = !isAdminNode && directReportCount > 0;
 
   return (
     <div>
@@ -50,18 +49,23 @@ function TreeNode({ node, isRoot, collapsed, onToggle, onAssign, onReplace }) {
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium text-ink">{fullName(node)}</span>
             <span className={`badge-neutral ${isAdminNode ? 'bg-primary-100 text-primary-700' : ''}`}>{roleLabel(node)}</span>
+            <span className="text-xs text-muted">{`(${node.employeeDetails?.workLocation || 'No Work Location'})`}</span>
             <StatusBadge status={node.isActive ? 'active' : 'inactive'} />
           </div>
           <p className="text-xs text-muted">
             {node.employeeDetails?.employeeId || 'No Employee ID'}
-            {node.employeeDetails?.fieldForce?.territory && ` · Territory: ${node.employeeDetails.fieldForce.territory}`}
             {` · ${directReportCount} direct report${directReportCount === 1 ? '' : 's'}`}
           </p>
+          {node.hierarchyIssue && (
+            <p className="text-xs font-medium text-warning">
+              Invalid reporting line: {node.hierarchyIssue.level} reports to {node.hierarchyIssue.managerLevel} — expected {node.hierarchyIssue.expected}
+            </p>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
           {!isAdminNode && (
-            <button type="button" className="btn-ghost flex items-center gap-1 px-2 py-1.5 text-xs font-medium" title="Change this person's field-force tier or reporting manager" onClick={() => onAssign(node)}>
+            <button type="button" className="btn-ghost flex items-center gap-1 px-2 py-1.5 text-xs font-medium" title="Change this person's role or reporting manager" onClick={() => onAssign(node)}>
               <Pencil size={14} /> Edit
             </button>
           )}
@@ -103,6 +107,17 @@ export default function OrgTree({ hierarchy, onChanged }) {
   const unassigned = hierarchy?.unassigned || [];
   const unattached = hierarchy?.unattached || [];
 
+  // Reporting manager shown from reportingManagerId alone (independent of the user's role).
+  const nodesById = new Map();
+  const index = (node) => { nodesById.set(String(node._id), node); (node.children || []).forEach(index); };
+  roots.forEach(index);
+  const managerLabel = (u) => {
+    const id = u.employeeDetails?.reportingManagerId;
+    if (!id) return 'Unassigned';
+    const m = nodesById.get(String(id));
+    return m ? fullName(m) : 'Assigned';
+  };
+
   return (
     <>
       <Card className="p-4">
@@ -125,18 +140,21 @@ export default function OrgTree({ hierarchy, onChanged }) {
             <span className="text-sm font-semibold">Unassigned / Pending Assignment ({unassigned.length})</span>
           </div>
           <p className="mb-3 text-xs text-muted">
-            Newly onboarded employees — HRMS onboarding created these users, but no Admin has assigned a field-force tier or reporting manager yet.
+            Newly onboarded employees — HRMS onboarding created these users, but no Admin has assigned a role or reporting manager yet.
           </p>
           {unassigned.map((u) => (
             <div key={u._id} className="flex items-center justify-between border-t border-line py-2 first:border-t-0">
               <div>
                 <span className="font-medium text-ink">{fullName(u)}</span>
                 <p className="text-xs text-muted">
-                  {u.employeeDetails?.employeeId || 'No Employee ID'} · {u.employeeDetails?.department || 'No department'} · {u.employeeDetails?.designation || 'No designation'}
+                  {u.employeeDetails?.employeeId || 'No Employee ID'} · {u.employeeDetails?.department || 'No department'} · {u.employeeDetails?.designation || 'No designation'} · {u.employeeDetails?.workLocation || 'No Work Location'}
                 </p>
-                <p className="text-xs text-muted">Field-force tier: <span className="font-medium">Unassigned</span> · Reporting manager: <span className="font-medium">Unassigned</span></p>
+                {/* Role and reporting manager are independent: each is shown from its own source (JobRole / reportingManagerId). */}
+                <p className="text-xs text-muted">
+                  Role: <span className="font-medium">{roleLabelOf(u) || 'Unassigned'}</span> · Reporting manager: <span className="font-medium">{managerLabel(u)}</span>
+                </p>
               </div>
-              <button type="button" className="btn-ghost flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-primary-600" title="Assign field-force tier & reporting manager" onClick={() => setAssignTarget(u)}>
+              <button type="button" className="btn-ghost flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-primary-600" title="Assign role & reporting manager" onClick={() => setAssignTarget(u)}>
                 <Pencil size={14} /> Edit
               </button>
             </div>
@@ -151,14 +169,14 @@ export default function OrgTree({ hierarchy, onChanged }) {
             <span className="text-sm font-semibold">Needs a reporting manager ({unattached.length})</span>
           </div>
           <p className="mb-3 text-xs text-muted">
-            These users carry a field-force tier but their reporting chain doesn&apos;t resolve up to an Admin — assign a valid manager to place them in the hierarchy.
+            These users carry a role but their reporting chain doesn&apos;t resolve up to an Admin — assign a valid manager to place them in the hierarchy.
           </p>
           {unattached.map((u) => (
             <div key={u._id} className="flex items-center justify-between border-t border-line py-2 first:border-t-0">
               <div>
                 <span className="font-medium text-ink">{fullName(u)}</span>{' '}
                 <span className="badge-neutral">{roleLabel(u)}</span>
-                <p className="text-xs text-muted">{u.employeeDetails?.employeeId || 'No Employee ID'} · {u.email}</p>
+                <p className="text-xs text-muted">{u.employeeDetails?.employeeId || 'No Employee ID'} · {u.email} · {u.employeeDetails?.workLocation || 'No Work Location'} · Reporting manager: {managerLabel(u)}</p>
               </div>
               <button type="button" className="btn-ghost flex items-center gap-1 px-2 py-1.5 text-xs font-medium" title="Change role / reporting manager" onClick={() => setAssignTarget(u)}>
                 <Pencil size={14} /> Edit
@@ -171,7 +189,6 @@ export default function OrgTree({ hierarchy, onChanged }) {
       <AssignRoleDialog
         open={Boolean(assignTarget)}
         user={assignTarget}
-        hierarchy={hierarchy}
         onClose={() => setAssignTarget(null)}
         onSaved={() => { setAssignTarget(null); onChanged(); }}
       />

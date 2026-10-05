@@ -3,7 +3,7 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LogOut, ClipboardList, CalendarDays, ChevronRight, ShieldCheck, Trash2 } from 'lucide-react-native';
 import { useAuth } from '../../context/AuthContext';
-import { displayName, resolveUserTier } from '../../navigation/roleHelpers';
+import { displayName, roleLabel } from '../../navigation/roleHelpers';
 import { openAccountDeletionInBrowser } from '../../config/legalUrls';
 import Card from '../../components/Card';
 import Button from '../../components/Button';
@@ -12,7 +12,7 @@ import { colors, spacing, typography, iconSizes } from '../../theme';
 
 export default function ManagerMoreScreen({ navigation }) {
   const { user, signOut } = useAuth();
-  const tier = resolveUserTier(user);
+  const tier = roleLabel(user);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -25,7 +25,7 @@ export default function ManagerMoreScreen({ navigation }) {
         <Card style={styles.card}>
           <Text style={styles.name}>{displayName(user)}</Text>
           <Text style={styles.role}>
-            {tier ? `${tier} · ${user?.employeeDetails?.fieldForce?.territory || 'MIRUS'}` : 'MIRUS'}
+            {tier ? `${tier} · MIRUS` : 'MIRUS'}
           </Text>
         </Card>
 

@@ -18,7 +18,7 @@ import { useAsync } from '../hooks/useAsync';
 import { useRefreshOnFocus } from '../hooks/useRefreshOnFocus';
 import * as fieldForceApi from '../api/fieldForce';
 import {
-  resolveUserTier,
+  roleLabel,
   displayName,
   isManagerTier
 } from '../navigation/roleHelpers';
@@ -38,7 +38,7 @@ import { colors, spacing, typography } from '../theme';
  */
 export default function HomeScreen({ navigation }) {
   const { user } = useAuth();
-  const tier = resolveUserTier(user);
+  const tier = roleLabel(user);
   const isManager = isManagerTier(user);
 
   const monthLabel = new Date().toLocaleString('en-US', {
@@ -69,8 +69,6 @@ export default function HomeScreen({ navigation }) {
 
   const refreshing = monitor.status === 'loading';
 
-  const territoryLabel =
-    user?.employeeDetails?.fieldForce?.territory || 'Zone';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -91,11 +89,7 @@ export default function HomeScreen({ navigation }) {
             </Text>
 
             <Text style={styles.heroSub}>
-              {tier
-                ? `${tier} · ${
-                    user?.employeeDetails?.fieldForce?.territory || 'MIRUS'
-                  }`
-                : 'MIRUS'}
+              {tier ? `${tier} · MIRUS` : 'MIRUS'}
             </Text>
           </View>
           <NotificationBell
@@ -125,7 +119,7 @@ export default function HomeScreen({ navigation }) {
               <Card style={styles.overviewCard}>
                 <View style={styles.overviewHeader}>
                   <Text style={typography.subtitle}>
-                    {monthLabel} · {territoryLabel}
+                    {monthLabel}
                   </Text>
                 </View>
 

@@ -1,14 +1,15 @@
 import ApiError from '../utils/ApiError.js';
 import User from '../models/User.js';
 import { PERMISSIONS, roleHasPermission } from '../config/permissions.js';
-import { isValidFieldTier, tierAtLeast } from '../config/fieldForce.js';
+import {
+  isFieldUser, isManagerUser, isAdminRole, leafUserFilter, JOB_ROLE_POPULATE
+} from '../services/fieldIdentity.js';
 
 /**
  * Field-force authorization scaffolding (Milestone 4, Domain 1).
  *
- * The mobile business-ops hierarchy (NSM→ZSM→RSM→ASM→BDM) is a *separate*
- * dimension from the existing HRMS `role`/permission system — see
- * config/fieldForce.js. Every check here reads only from `req.user` (populated
+ * The mobile business-ops role (JobRole.name, see config/fieldRoles.js) is a *separate*
+ * dimension from the existing HRMS `role`/permission system. Every check here reads only from `req.user` (populated
  * exclusively by `verifyToken` from the verified JWT + a fresh DB lookup) and
  * from the database — never from client-supplied body/query/params — so a
  * request cannot become authorized just because the mobile UI shows a screen.
@@ -29,12 +30,25 @@ export const hasCompanyWideFieldOpsAccess = (user) =>
   roleHasPermission(user.role, PERMISSIONS.FIELDOPS_MONITOR);
 
 /**
+ * Role-level check behind the route gates, resolved from the caller's JobRole
+ * (employeeDetails.jobRole -> JobRole.name; must be valid and active). The route-level
+ * argument keeps its historical meaning: `'BDM'` = any field-force role; anything above
+ * (`'ASM'`) = a manager-capability field role. A user without a valid field role
+ * (no JobRole, inactive/deleted/foreign JobRole, HR/Accountant/...) never passes.
+ */
+const meetsFieldRole = async (user, minTier) => {
+  if (!isFieldUser(user)) return false;
+  if (minTier === 'BDM') return true;
+  return isManagerUser(user);
+};
+
+/**
  * requireFieldTier(minTier) — Express middleware, must run after `verifyToken`.
  *
  * Grants access when the caller either:
  *  - already has company-wide field-ops access via their HRMS role (admin/
  *    superadmin), or
- *  - carries a `fieldForce.tier` at or above `minTier` in the hierarchy.
+ *  - holds a field-force JobRole at or above `minTier`.
  *
  * This is tier #1–#3 of the six-point check the caller asked for (existing
  * authentication is `verifyToken` itself, which must run first). Reporting
@@ -42,15 +56,15 @@ export const hasCompanyWideFieldOpsAccess = (user) =>
  * `canAccessFieldOpsUser` / the tenantScope plugin, since those depend on the
  * specific resource being accessed, not just the caller's own tier.
  */
-export const requireFieldTier = (minTier) => (req, res, next) => {
-  if (!req.user) return next(new ApiError(401, 'Authentication required'));
-  if (hasCompanyWideFieldOpsAccess(req.user)) return next();
-
-  const tier = req.user.employeeDetails?.fieldForce?.tier;
-  if (!tier || !isValidFieldTier(tier) || !tierAtLeast(tier, minTier)) {
-    return next(new ApiError(403, 'Insufficient field-force tier for this action'));
-  }
-  next();
+export const requireFieldTier = (minTier) => async (req, res, next) => {
+  try {
+    if (!req.user) return next(new ApiError(401, 'Authentication required'));
+    if (hasCompanyWideFieldOpsAccess(req.user)) return next();
+    if (!(await meetsFieldRole(req.user, minTier))) {
+      return next(new ApiError(403, 'Insufficient field-force role for this action'));
+    }
+    next();
+  } catch (err) { next(err); }
 };
 
 /**
@@ -61,15 +75,15 @@ export const requireFieldTier = (minTier) => (req, res, next) => {
  * grants keep working, while every new domain (Doctor, DCR, MTP, ...) states
  * its own capability explicitly rather than overloading one flag for everything.
  */
-export const requireFieldCapability = (permission, minTier) => (req, res, next) => {
-  if (!req.user) return next(new ApiError(401, 'Authentication required'));
-  if (roleHasPermission(req.user.role, permission)) return next();
-
-  const tier = req.user.employeeDetails?.fieldForce?.tier;
-  if (!tier || !isValidFieldTier(tier) || !tierAtLeast(tier, minTier)) {
-    return next(new ApiError(403, 'Insufficient field-force tier for this action'));
-  }
-  next();
+export const requireFieldCapability = (permission, minTier) => async (req, res, next) => {
+  try {
+    if (!req.user) return next(new ApiError(401, 'Authentication required'));
+    if (roleHasPermission(req.user.role, permission)) return next();
+    if (!(await meetsFieldRole(req.user, minTier))) {
+      return next(new ApiError(403, 'Insufficient field-force role for this action'));
+    }
+    next();
+  } catch (err) { next(err); }
 };
 
 /**
@@ -116,14 +130,14 @@ export const buildReportingSubtreeIds = async (managerId, { maxDepth = 8 } = {})
  *    scope) — e.g. an ASM's subtree contains their BDMs, an RSM's contains
  *    those BDMs plus the ASMs between them, and so on up to NSM.
  *
- * An actor with no `fieldForce.tier` and no company-wide access can only ever
+ * An actor with no field-force JobRole and no company-wide access can only ever
  * satisfy the "own record" branch.
  */
 export const canAccessFieldOpsUser = async (actor, targetUserId) => {
   const targetId = String(targetUserId);
   if (String(actor._id) === targetId) return true;
   if (hasCompanyWideFieldOpsAccess(actor)) return true;
-  if (!actor.employeeDetails?.fieldForce?.tier) return false;
+  if (!isFieldUser(actor)) return false;
 
   const subtree = await buildReportingSubtreeIds(actor._id);
   return subtree.has(targetId);
@@ -195,10 +209,7 @@ export const wouldCreateCycle = async (userId, candidateManagerId, { maxDepth = 
   return false;
 };
 
-const PARTICIPANT_SELECT = 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce';
-// The fixed hierarchy's manager tiers — never Admin (no fieldForce.tier of
-// their own) and never BDM (that is the "OTHERS" bucket, not a manager).
-const MANAGER_TIERS = ['ASM', 'RSM', 'ZSM', 'NSM'];
+const PARTICIPANT_SELECT = 'personalDetails.firstName personalDetails.lastName role employeeDetails.jobRole';
 
 /**
  * The caller's own eligible Joint Call / Manager Meeting participants:
@@ -218,23 +229,30 @@ const MANAGER_TIERS = ['ASM', 'RSM', 'ZSM', 'NSM'];
  */
 export const resolveJointCallParticipants = async (userId) => {
   const chainIds = [...(await buildReportingChainAbove(userId))];
-  const chainUsers = chainIds.length ? await User.find({ _id: { $in: chainIds } }).select(PARTICIPANT_SELECT) : [];
-  const managers = chainUsers.filter((u) => MANAGER_TIERS.includes(u.employeeDetails?.fieldForce?.tier));
+  const chainUsers = chainIds.length
+    ? await User.find({ _id: { $in: chainIds } }).select(PARTICIPANT_SELECT).populate(JOB_ROLE_POPULATE)
+    : [];
+  // A chain member is a "manager participant" if their JobRole is a manager-capability
+  // field role. Admin/superadmin (HRMS role) are never participants.
+  const managers = chainUsers.filter((u) => !isAdminRole(u) && isManagerUser(u));
 
   const caller = await User.findById(userId).select('employeeDetails.reportingManagerId');
   const managerId = caller?.employeeDetails?.reportingManagerId;
-  const others = managerId
-    ? await User.find({
-      _id: { $ne: userId },
-      'employeeDetails.reportingManagerId': managerId,
-      'employeeDetails.fieldForce.tier': 'BDM'
-    }).select(PARTICIPANT_SELECT)
-    : [];
+  let others = [];
+  if (managerId) {
+    const peers = await User.find({
+      $and: [
+        { _id: { $ne: userId }, 'employeeDetails.reportingManagerId': managerId, deletedAt: null },
+        await leafUserFilter() // "Others" = same-team peers in the leaf (BDM) role
+      ]
+    }).select(PARTICIPANT_SELECT).populate(JOB_ROLE_POPULATE);
+    others = peers;
+  }
 
   return { managers, others };
 };
 
-/** True if `candidateId` is a genuinely eligible Joint Call companion for `userId` — a real manager above them (ASM/RSM/ZSM/NSM), or a same-team BDM. */
+/** True if `candidateId` is a genuinely eligible Joint Call companion for `userId` — a real manager above them (a manager-capability JobRole), or a same-team BDM. */
 export const isEligibleJointCallParticipant = async (userId, candidateId) => {
   if (!candidateId) return false;
   const { managers, others } = await resolveJointCallParticipants(userId);

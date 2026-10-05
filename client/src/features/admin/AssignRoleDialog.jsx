@@ -1,105 +1,76 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
-import { TriangleAlert } from 'lucide-react';
 import FormDialog from '../../components/ui/FormDialog.jsx';
-import { updateUser } from '../../api/users.js';
-import { FIELD_TIERS, FIELD_TIER_LABELS, REQUIRED_MANAGER_TIER } from '../../config/fieldForce.js';
+import { updateUserFull, getEligibleManagers } from '../../api/users.js';
+import { listJobRoles } from '../../api/jobRoles.js';
 import { fullName } from '../../config/constants.js';
 import { notifySuccess, notifyError } from '../ui/toastSlice.js';
 
-/** Flatten the hierarchy tree (roots + descendants + unattached) into one list, for building the manager picker. */
-const flattenHierarchy = (hierarchy) => {
-  if (!hierarchy) return [];
-  const out = [];
-  const walk = (node) => { out.push(node); (node.children || []).forEach(walk); };
-  (hierarchy.roots || []).forEach(walk);
-  (hierarchy.unattached || []).forEach((u) => out.push(u));
-  return out;
-};
-
-export default function AssignRoleDialog({ open, user, hierarchy, onClose, onSaved }) {
+export default function AssignRoleDialog({ open, user, onClose, onSaved }) {
   const dispatch = useDispatch();
-  const [tier, setTier] = useState('');
-  const [territory, setTerritory] = useState('');
+  const [jobRoles, setJobRoles] = useState([]);
+  const [jobRoleId, setJobRoleId] = useState('');
   const [managerId, setManagerId] = useState('');
   const [isActive, setIsActive] = useState(true);
+  const [workLocation, setWorkLocation] = useState('');
+  const [locationTouched, setLocationTouched] = useState(false);
   const [saving, setSaving] = useState(false);
-  // Set only when the server rejects a tier change because it would leave
-  // existing direct reports in an invalid reporting relationship — the
-  // Admin must resolve every one of them (a new valid manager each) before
-  // the tier change can be retried and committed.
-  const [affected, setAffected] = useState(null);
-  const [reassignSelections, setReassignSelections] = useState({});
+  const [managerOptions, setManagerOptions] = useState([]);
+  const [inactiveEligible, setInactiveEligible] = useState([]);
+  const [loadingManagers, setLoadingManagers] = useState(false);
+  const isAdminUser = user?.role === 'admin' || user?.role === 'superadmin';
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    listJobRoles().then((rows) => { if (!cancelled) setJobRoles(rows || []); }).catch(() => { if (!cancelled) setJobRoles([]); });
+    return () => { cancelled = true; };
+  }, [open]);
 
   useEffect(() => {
     if (!user) return;
-    setTier(user.employeeDetails?.fieldForce?.tier || '');
-    setTerritory(user.employeeDetails?.fieldForce?.territory || '');
+    setJobRoleId(user.jobRole?.id || '');
     setManagerId(user.employeeDetails?.reportingManagerId ? String(user.employeeDetails.reportingManagerId) : '');
     setIsActive(Boolean(user.isActive));
-    setAffected(null);
-    setReassignSelections({});
+    setWorkLocation(user.employeeDetails?.workLocation || '');
+    setLocationTouched(false);
   }, [user]);
 
-  const allUsers = useMemo(() => flattenHierarchy(hierarchy), [hierarchy]);
-
-  const requiredParentTier = tier ? REQUIRED_MANAGER_TIER[tier] : undefined;
-  const managerOptions = useMemo(() => {
-    if (!user) return [];
-    if (!tier) {
-      // No tier selected — any existing admin or manager-tier user can still
-      // serve as a general reporting line; no tier-match enforced client-side
-      // (the server only tier-validates when an effective tier is present).
-      return allUsers.filter((u) => String(u._id) !== String(user._id));
-    }
-    if (requiredParentTier === null) {
-      return allUsers.filter((u) => u.role === 'admin' || u.role === 'superadmin');
-    }
-    return allUsers.filter((u) => u.employeeDetails?.fieldForce?.tier === requiredParentTier && String(u._id) !== String(user._id));
-  }, [allUsers, tier, requiredParentTier, user]);
-
-  /** Valid replacement-manager candidates for one AFFECTED direct report — filtered by THAT report's own required parent tier, never the tier being assigned to `user`. */
-  const optionsFor = (requiredTier) => allUsers.filter((u) => u.employeeDetails?.fieldForce?.tier === requiredTier);
-
-  const buildPayload = () => {
-    const payload = { fieldForceTier: tier || null, fieldForceTerritory: territory || undefined, isActive };
-    if (managerId) payload.reportingManagerId = managerId;
-    return payload;
-  };
+  // Candidates come from the server for the role currently selected in this dialog.
+  useEffect(() => {
+    if (!open || !user || isAdminUser) { setManagerOptions([]); return undefined; }
+    let cancelled = false;
+    setLoadingManagers(true);
+    getEligibleManagers(user._id, jobRoleId || null)
+      .then((res) => {
+        if (cancelled) return;
+        const rows = res?.data || [];
+        setInactiveEligible(res?.inactiveEligible || []);
+        setManagerOptions(rows);
+        // A previously chosen manager that is not valid for this role is dropped from the form.
+        setManagerId((cur) => (rows.some((m) => String(m._id) === String(cur)) ? cur : ''));
+      })
+      .catch(() => { if (!cancelled) { setManagerOptions([]); setInactiveEligible([]); } })
+      .finally(() => { if (!cancelled) setLoadingManagers(false); });
+    return () => { cancelled = true; };
+  }, [open, user, jobRoleId, isAdminUser]);
 
   const submit = async (e) => {
     e.preventDefault();
     if (!user) return;
     setSaving(true);
     try {
-      await updateUser(user._id, buildPayload());
+      const payload = { jobRoleId: jobRoleId || null, isActive };
+      if (managerId && !isAdminUser) payload.reportingManagerId = managerId;
+      // Same field as User Management (employeeDetails.workLocation); only sent when edited here.
+      if (locationTouched) payload.workLocation = workLocation;
+      const res = await updateUserFull(user._id, payload);
       dispatch(notifySuccess(`${fullName(user)} updated.`));
-      onSaved?.();
-    } catch (err) {
-      const affectedList = err.response?.status === 409 ? err.response?.data?.details?.affected : null;
-      if (affectedList?.length) {
-        setAffected(affectedList);
-        setReassignSelections({});
-      } else {
-        dispatch(notifyError(err.uiMessage));
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const submitReassignment = async (e) => {
-    e.preventDefault();
-    if (!user || !affected) return;
-    setSaving(true);
-    try {
-      const reassignments = affected.map((a) => ({ userId: a.id, reportingManagerId: reassignSelections[a.id] }));
-      await updateUser(user._id, { ...buildPayload(), reassignments });
-      dispatch(notifySuccess(`${fullName(user)} updated — ${affected.length} direct report${affected.length === 1 ? '' : 's'} reassigned.`));
+      if (res.hierarchyWarning) dispatch(notifyError(res.hierarchyWarning));
       onSaved?.();
     } catch (err) {
       dispatch(notifyError(err.uiMessage));
@@ -108,44 +79,8 @@ export default function AssignRoleDialog({ open, user, hierarchy, onClose, onSav
     }
   };
 
-  const allReassignmentsChosen = affected?.every((a) => reassignSelections[a.id]);
-
-  if (affected) {
-    return (
-      <FormDialog
-        open={open} onClose={onClose} onSubmit={submitReassignment} loading={saving}
-        title="Reassign Affected Direct Reports" subtitle={`${fullName(user)}: ${user?.employeeDetails?.fieldForce?.tier || 'No tier'} → ${tier || 'No tier'}`}
-        formId="reassign-affected-form" submitLabel="Continue"
-      >
-        <div className="grid grid-cols-1 gap-4 pt-1">
-          <div className="flex items-start gap-2 rounded-md bg-warning-soft p-3 text-sm text-warning">
-            <TriangleAlert size={18} className="mt-0.5 shrink-0" />
-            <p>
-              {affected.length} direct report{affected.length === 1 ? '' : 's'} will be affected by this tier change and must be reassigned to a valid manager before continuing.
-            </p>
-          </div>
-
-          {affected.map((a) => (
-            <div key={a.id} className="rounded-md border border-line p-3">
-              <p className="font-medium text-ink">{a.name}</p>
-              <p className="mb-2 text-xs text-muted">{a.tier} · Employee ID: {a.employeeId || 'None'} · Current manager: {fullName(user)}</p>
-              <TextField
-                select label={`New reporting manager (must be ${a.requiredManagerTier || 'Admin'})`} fullWidth size="small"
-                value={reassignSelections[a.id] || ''}
-                onChange={(e) => setReassignSelections((prev) => ({ ...prev, [a.id]: e.target.value }))}
-              >
-                {optionsFor(a.requiredManagerTier).length === 0 && <MenuItem value="" disabled>No {a.requiredManagerTier} available</MenuItem>}
-                {optionsFor(a.requiredManagerTier).map((m) => (
-                  <MenuItem key={m._id} value={m._id}>{fullName(m)} ({m.employeeDetails?.employeeId || m.email})</MenuItem>
-                ))}
-              </TextField>
-            </div>
-          ))}
-        </div>
-        {!allReassignmentsChosen && <p className="mt-2 text-xs text-muted">Select a new manager for every affected employee to continue.</p>}
-      </FormDialog>
-    );
-  }
+  // Keep an unresolved current value selectable so the Select never shows an out-of-range value.
+  const currentMissing = jobRoleId && !jobRoles.some((r) => String(r._id) === String(jobRoleId));
 
   return (
     <FormDialog
@@ -154,31 +89,43 @@ export default function AssignRoleDialog({ open, user, hierarchy, onClose, onSav
     >
       <div className="grid grid-cols-1 gap-4 pt-1">
         <TextField
-          select label="Field-force tier" value={tier}
-          onChange={(e) => { setTier(e.target.value); setManagerId(''); }}
-          helperText="The strict Admin → NSM → ZSM → RSM → ASM → BDM hierarchy tier"
+          select label="Role" value={jobRoleId}
+          onChange={(e) => setJobRoleId(e.target.value)}
+          helperText="Job roles come from Setup → Roles. Reporting lines below define the actual hierarchy."
           fullWidth
         >
-          <MenuItem value="">No field-force tier</MenuItem>
-          {FIELD_TIERS.map((t) => <MenuItem key={t} value={t}>{t} — {FIELD_TIER_LABELS[t]}</MenuItem>)}
+          <MenuItem value="">No role</MenuItem>
+          {currentMissing && <MenuItem value={jobRoleId}>{user?.jobRole?.name || 'Current role'}</MenuItem>}
+          {jobRoles.map((r) => <MenuItem key={r._id} value={r._id}>{r.name}</MenuItem>)}
         </TextField>
 
-        {tier && (
-          <TextField label="Territory" value={territory} onChange={(e) => setTerritory(e.target.value)} fullWidth placeholder="e.g. Pune Central" />
+        {isAdminUser ? (
+          <p className="text-sm text-muted">Admins are the top of the hierarchy and have no reporting manager.</p>
+        ) : (
+          <TextField
+            select label="Reporting manager" value={managerId} onChange={(e) => setManagerId(e.target.value)}
+            fullWidth disabled={loadingManagers}
+            helperText={managerOptions.length === 0 && !loadingManagers
+              ? (inactiveEligible.length > 0
+                ? `No ACTIVE user at the required level. Inactive: ${inactiveEligible.join(', ')} — activate the account (Edit → Active account) to select them.`
+                : 'No valid manager exists for this role yet (a BDM reports to an ASM, ASM to an RSM, RSM to a ZSM, ZSM to an Admin).')
+              : 'Only active users in the level directly above this role are listed.'}
+          >
+            <MenuItem value="">— Unchanged / none —</MenuItem>
+            {managerOptions.map((m) => (
+              <MenuItem key={m._id} value={m._id}>
+                {m.name} ({m.roleName || 'No role'}{m.employeeId ? ` · ${m.employeeId}` : ''})
+              </MenuItem>
+            ))}
+          </TextField>
         )}
 
         <TextField
-          select label="Reporting manager" value={managerId} onChange={(e) => setManagerId(e.target.value)}
-          fullWidth
-          helperText={tier ? `Must be ${requiredParentTier === null ? 'an Admin' : `a ${requiredParentTier}`}` : 'Any existing user'}
-        >
-          <MenuItem value="">— Unchanged / none —</MenuItem>
-          {managerOptions.map((m) => (
-            <MenuItem key={m._id} value={m._id}>
-              {fullName(m)} ({m.role === 'admin' || m.role === 'superadmin' ? 'Admin' : `${m.employeeDetails?.fieldForce?.tier} - ${m.employeeDetails?.fieldForce.territory}`})
-            </MenuItem>
-          ))}
-        </TextField>
+          label="Work Location" value={workLocation} fullWidth placeholder="e.g. Hyderabad"
+          onChange={(e) => { setWorkLocation(e.target.value); setLocationTouched(true); }}
+          helperText="The employee's current work location. Leave empty to clear it."
+          inputProps={{ maxLength: 120 }}
+        />
 
         <FormControlLabel control={<Switch checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />} label="Active account" />
       </div>

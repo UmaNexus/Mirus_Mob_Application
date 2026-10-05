@@ -7,18 +7,19 @@ import asyncHandler from '../utils/asyncHandler.js';
 import { logActivity } from '../services/activityService.js';
 import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds, buildReportingChainAbove, canAccessFieldOpsUser } from '../middleware/fieldForceAuth.js';
 import { buildApprovalInfo } from '../utils/approvalInfo.js';
+import { JOB_ROLE_POPULATE, roleOf, isAdminRole } from '../services/fieldIdentity.js';
 import { dispatchNotification } from '../services/notificationService.js';
 
 const EDITABLE_STATUSES = ['draft', 'rejected', 'withdrawn'];
-const APPROVER_SELECT = 'personalDetails.firstName personalDetails.lastName role employeeDetails.fieldForce employeeDetails.employeeId';
+const APPROVER_SELECT = 'personalDetails.firstName personalDetails.lastName role employeeDetails.jobRole employeeDetails.employeeId';
 const POPULATE = [
   { path: 'plannedVisits.doctorId', select: 'name speciality area' },
-  { path: 'approverId', select: APPROVER_SELECT }
+  { path: 'approverId', select: APPROVER_SELECT, populate: JOB_ROLE_POPULATE }
 ];
 
-// Eligible approver tiers, per the fixed hierarchy (never RBM/ZBM). Admin/
-// superadmin qualify separately via their existing company-wide access.
-const APPROVER_TIERS = ['ASM', 'RSM', 'ZSM', 'NSM'];
+// Eligible approvers: users in the caller's own chain whose JobRole is a manager-capability
+// field role. Admin/superadmin qualify separately via their existing company-wide access.
+const isChainApprover = (u) => !isAdminRole(u) && roleOf(u).isManager;
 
 /**
  * The caller's own real eligible approvers:
@@ -38,10 +39,10 @@ const APPROVER_TIERS = ['ASM', 'RSM', 'ZSM', 'NSM'];
 const resolveEligibleApprovers = async (userId) => {
   const chainIds = [...(await buildReportingChainAbove(userId))];
   const [chainUsers, admins] = await Promise.all([
-    chainIds.length ? User.find({ _id: { $in: chainIds } }).select(APPROVER_SELECT) : [],
+    chainIds.length ? User.find({ _id: { $in: chainIds } }).select(APPROVER_SELECT).populate(JOB_ROLE_POPULATE) : [],
     User.find({ role: { $in: ['admin', 'superadmin'] } }).select(APPROVER_SELECT)
   ]);
-  const tieredApprovers = chainUsers.filter((u) => APPROVER_TIERS.includes(u.employeeDetails?.fieldForce?.tier));
+  const tieredApprovers = chainUsers.filter(isChainApprover);
   return [...tieredApprovers, ...admins];
 };
 
@@ -342,7 +343,7 @@ export const listPendingApprovals = asyncHandler(async (req, res) => {
     ];
   }
   const plans = await MonthlyTourPlan.find(filter)
-    .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce')
+    .populate('userId', 'personalDetails.firstName personalDetails.lastName')
     .populate(POPULATE)
     .sort({ submittedAt: 1 });
   res.status(200).json({ success: true, data: plans });
@@ -361,7 +362,7 @@ export const listTeamMtp = asyncHandler(async (req, res) => {
   if (req.query.month) filter.month = String(req.query.month);
 
   const plans = await MonthlyTourPlan.find(filter)
-    .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce')
+    .populate('userId', 'personalDetails.firstName personalDetails.lastName')
     .populate(POPULATE)
     .sort({ month: -1 })
     .limit(2000);

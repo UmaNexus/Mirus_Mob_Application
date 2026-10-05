@@ -56,7 +56,7 @@ export default function DoctorAssignmentScreen({ navigation }) {
 
   const bdmOptions = useMemo(
     () => (team.data || [])
-      .filter((u) => u.employeeDetails?.fieldForce?.tier === 'BDM')
+      .filter((u) => u.isLeaf)
       .map((u) => ({ label: `${u.personalDetails?.firstName || ''} ${u.personalDetails?.lastName || ''}`.trim() || u.email, value: u._id })),
     [team.data]
   );

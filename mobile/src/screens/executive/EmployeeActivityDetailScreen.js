@@ -22,7 +22,7 @@ export default function EmployeeActivityDetailScreen({ route }) {
         <Card style={styles.hero}>
           <Text style={styles.name}>{employee.name || 'Unnamed'}</Text>
           <Text style={styles.meta}>
-            {employee.tier}{employee.territory ? ` · ${employee.territory}` : ''}{employee.employeeId ? ` · ${employee.employeeId}` : ''}
+            {employee.roleName || ''}{employee.employeeId ? ` · ${employee.employeeId}` : ''}
           </Text>
           {employee.status ? <StatusBadge label={STATUS_LABEL[employee.status]} tone={STATUS_TONE[employee.status]} /> : null}
         </Card>

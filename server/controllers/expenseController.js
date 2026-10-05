@@ -9,9 +9,10 @@ import { logActivity } from '../services/activityService.js';
 import { rupeesToPaisa } from '../utils/money.js';
 import { hasCompanyWideFieldOpsAccess, buildReportingSubtreeIds, canAccessFieldOpsUser } from '../middleware/fieldForceAuth.js';
 import { buildApprovalInfo } from '../utils/approvalInfo.js';
+import { JOB_ROLE_POPULATE } from '../services/fieldIdentity.js';
 import { dispatchNotification } from '../services/notificationService.js';
 
-const APPROVER_SELECT = 'personalDetails.firstName personalDetails.lastName role employeeDetails.fieldForce employeeDetails.employeeId';
+const APPROVER_SELECT = 'personalDetails.firstName personalDetails.lastName role employeeDetails.jobRole employeeDetails.employeeId';
 
 /**
  * POST /api/expenses — a BDM submits an expense claim, optionally with a
@@ -131,8 +132,8 @@ export const listTeamExpenses = asyncHandler(async (req, res) => {
   }
 
   const expenses = await Expense.find(filter)
-    .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce')
-    .populate('approverId', APPROVER_SELECT)
+    .populate('userId', 'personalDetails.firstName personalDetails.lastName')
+    .populate({ path: 'approverId', select: APPROVER_SELECT, populate: JOB_ROLE_POPULATE })
     .sort({ date: -1 })
     .limit(2000);
 
@@ -156,7 +157,7 @@ export const listPendingApprovals = asyncHandler(async (req, res) => {
     ];
   }
   const expenses = await Expense.find(filter)
-    .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce')
+    .populate('userId', 'personalDetails.firstName personalDetails.lastName')
     .sort({ createdAt: 1 });
   res.status(200).json({ success: true, data: expenses });
 });

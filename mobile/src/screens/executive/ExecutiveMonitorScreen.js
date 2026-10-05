@@ -12,7 +12,8 @@ import ErrorBanner from '../../components/ErrorBanner';
 import EmptyState from '../../components/EmptyState';
 import { colors, spacing, typography, iconSizes } from '../../theme';
 
-const MANAGER_TIERS = ['ASM', 'RSM', 'ZSM', 'NSM'];
+// The server sends `directReportCount` only for manager rows (drill-able); leaf rows carry performance instead.
+const isManagerRow = (row) => typeof row.directReportCount === 'number';
 
 const initials = (name) => (name || '?').split(' ').filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join('') || '?';
 
@@ -35,7 +36,7 @@ export default function ExecutiveMonitorScreen({ navigation, route }) {
   const rows = directory.data?.data || [];
 
   const onRowPress = (row) => {
-    if (MANAGER_TIERS.includes(row.tier)) {
+    if (isManagerRow(row)) {
       navigation.push('ExecutiveMonitorMain', { managerId: row.userId, managerName: row.name });
     } else {
       navigation.navigate('EmployeeActivityDetail', { employee: row });
@@ -66,8 +67,8 @@ export default function ExecutiveMonitorScreen({ navigation, route }) {
               <View style={{ flex: 1 }}>
                 <Text style={styles.name}>{item.name || 'Unnamed'}</Text>
                 <Text style={styles.meta}>
-                  {item.tier}{item.territory ? ` · ${item.territory}` : ''}
-                  {MANAGER_TIERS.includes(item.tier)
+                  {item.roleName || 'No role'}
+                  {isManagerRow(item)
                     ? ` · ${item.directReportCount} direct report${item.directReportCount === 1 ? '' : 's'}`
                     : ''}
                 </Text>
@@ -76,7 +77,7 @@ export default function ExecutiveMonitorScreen({ navigation, route }) {
                 )}
               </View>
               {item.status ? <StatusBadge label={STATUS_LABEL[item.status]} tone={STATUS_TONE[item.status]} /> : null}
-              {MANAGER_TIERS.includes(item.tier) ? <ChevronRight size={iconSizes.header} color={colors.muted} /> : null}
+              {isManagerRow(item) ? <ChevronRight size={iconSizes.header} color={colors.muted} /> : null}
             </View>
           </Card>
         )}

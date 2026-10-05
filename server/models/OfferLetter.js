@@ -6,6 +6,9 @@ const OfferLetterSchema = new mongoose.Schema({
   candidateEmail: { type: String, required: true, lowercase: true, trim: true, index: true },
   fullName: { type: String, required: true, trim: true },
   position: { type: String, required: true, trim: true },
+  // JobRole.name at the time of the offer (display)
+  // The existing JobRole chosen for this offer; carried to employeeDetails.jobRole on approval.
+  jobRoleId: { type: mongoose.Schema.Types.ObjectId, ref: 'JobRole', default: null },
   department: { type: String, required: true },
   phone: { type: String, trim: true, default: '' },
   city: { type: String, trim: true, default: '' },

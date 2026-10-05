@@ -1,19 +1,23 @@
+import { roleOf } from '../services/fieldIdentity.js';
+
 const personName = (user) => {
   if (!user) return null;
   return `${user.personalDetails?.firstName || ''} ${user.personalDetails?.lastName || ''}`.trim() || null;
 };
 
-const roleOrTierLabel = (user) => {
+// Role label shown next to an approver: Admin, else the JobRole name, else the HRMS role.
+// Never throws.
+const roleLabel = (user) => {
   if (!user) return null;
   if (user.role === 'admin' || user.role === 'superadmin') return 'Admin';
-  return user.employeeDetails?.fieldForce?.tier || user.role || null;
+  return roleOf(user).name || user.role || null;
 };
 
 const personSummary = (user) => ({
   userId: user._id,
   name: personName(user),
   employeeId: user.employeeDetails?.employeeId || null,
-  role: roleOrTierLabel(user)
+  role: roleLabel(user)
 });
 
 /**

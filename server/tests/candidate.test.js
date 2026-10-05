@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import request from 'supertest';
 import * as db from './helpers/testDb.js';
 import app from '../app.js';
-import { authAgent, DEFAULT_COMPANY_SLUG } from './helpers/factories.js';
+import { authAgent, DEFAULT_COMPANY_SLUG, getOrCreateJobRole } from './helpers/factories.js';
 import { clearOutbox, getOutbox } from '../services/emailService.js';
 import SalaryStructureTemplate from '../models/SalaryStructureTemplate.js';
 
@@ -26,6 +26,7 @@ const stageOffer = async () => {
     deductionsStructure: [{ key: 'pf', label: 'PF', calculationType: 'percentage_of_basic', valueFactor: 12 }]
   });
   const tpl = await SalaryStructureTemplate.findOne({ companyId: company._id, name: 'Eng' });
+  await getOrCreateJobRole(company._id, 'Designer'); // offers use an existing job role
   const res = await agent.post('/api/offers').send({
     candidateEmail: 'cand@example.com', fullName: 'Vikram Singh', position: 'Designer',
     department: 'Design', joiningDate: '2026-07-15', templateId: tpl._id, annualCTC: 1200000

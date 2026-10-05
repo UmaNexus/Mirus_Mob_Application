@@ -5,6 +5,7 @@ import { dispatchNotification } from '../services/notificationService.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { logActivity } from '../services/activityService.js';
+import { roleOf } from '../services/fieldIdentity.js';
 import {
   hasCompanyWideFieldOpsAccess,
   buildReportingSubtreeIds,
@@ -27,15 +28,20 @@ const MANAGER_TYPES = ['fieldcall', 'jointcall', 'camp', 'meeting', 'sick', 'lea
  */
 export const upsertWorkType = asyncHandler(async (req, res) => {
   const { date, type, details = {} } = req.body;
-  const tier = req.user.employeeDetails?.fieldForce?.tier;
+  // Position kind comes from the caller's JobRole: the leaf (BDM) role vs a manager-capability
+  // role. No field role at all => no type restriction (existing behavior for non-field users).
+  const role = roleOf(req.user);
+  let positionKind = null;
+  if (role.isLeaf) positionKind = 'leaf';
+  else if (role.isManager) positionKind = 'manager';
 
   // The demo presents two distinct type sets (BDM vs manager screens) — a
   // manager cannot log "individual call" (that is a BDM/DCR concept) and a
   // BDM cannot log "field call" (a manager-only concept).
-  if (tier === 'BDM' && !BDM_TYPES.includes(type)) {
-    throw new ApiError(400, `Work type "${type}" is not valid for a BDM`);
+  if (positionKind === 'leaf' && !BDM_TYPES.includes(type)) {
+    throw new ApiError(400, `Work type "${type}" is not valid for a field rep`);
   }
-  if (tier && tier !== 'BDM' && !MANAGER_TYPES.includes(type)) {
+  if (positionKind === 'manager' && !MANAGER_TYPES.includes(type)) {
     throw new ApiError(400, `Work type "${type}" is not valid for a manager`);
   }
 
@@ -131,7 +137,7 @@ export const listTeamWorkType = asyncHandler(async (req, res) => {
   if (req.query.date) filter.dateKey = String(req.query.date);
 
   const workTypes = await WorkType.find(filter)
-    .populate('userId', 'personalDetails.firstName personalDetails.lastName employeeDetails.fieldForce')
+    .populate('userId', 'personalDetails.firstName personalDetails.lastName')
     .sort({ dateKey: -1 })
     .limit(2000);
   res.status(200).json({ success: true, data: workTypes });
