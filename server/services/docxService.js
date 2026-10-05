@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import { resolveTemplateFilePath } from './pdfService.js';
+import { applyCFFieldDefaults, resolveCFField, CF_FIELD_ALIASES } from '../config/cfFields.js';
 
 const execFileAsync = promisify(execFile);
 const ROOT = path.resolve();
@@ -78,7 +79,7 @@ export const formatCFAgreementData = (fields = {}, company = null) => {
   const commission = rawCommission;
   const recipientEmail = v('recipientEmail', '');
 
-  return {
+  const out = {
     companyName,
     companyAddress,
     companyRepresentative,
@@ -102,6 +103,15 @@ export const formatCFAgreementData = (fields = {}, company = null) => {
     agreementYear: fullYear,
     agreementPlace: v('agreementPlace', company?.address?.city || 'Hyderabad')
   };
+
+  // Populate alias keys so docx templates using {{PAN1}}, {{State}}, etc. work
+  for (const [alias, canonical] of Object.entries(CF_FIELD_ALIASES)) {
+    if (out[canonical] && !out[alias]) {
+      out[alias] = out[canonical];
+    }
+  }
+
+  return out;
 };
 
 /**

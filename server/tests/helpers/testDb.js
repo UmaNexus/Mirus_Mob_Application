@@ -9,7 +9,7 @@ let mongod;
 
 /** Spin up an isolated in-memory MongoDB and connect Mongoose to it. */
 export const connect = async () => {
-  mongod = await MongoMemoryServer.create();
+  mongod = await MongoMemoryServer.create({ instance: { launchTimeout: 30000 } });
   await mongoose.connect(mongod.getUri());
 };
 

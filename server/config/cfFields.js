@@ -45,6 +45,60 @@ export const validateCFFields = (type, values = {}) => {
   return missing;
 };
 
+export const CF_FIELD_ALIASES = {
+  PAN1: 'partyPan',
+  pan1: 'partyPan',
+  PAN2: 'partnerPan',
+  pan2: 'partnerPan',
+  RegisteredOffice: 'partyAddress',
+  registeredOffice: 'partyAddress',
+  State: 'territory',
+  state: 'territory',
+  Dateofappointment: 'effectiveFrom',
+  dateofappointment: 'effectiveFrom',
+  Endofappointment: 'effectiveTo',
+  endofappointment: 'effectiveTo',
+  NamedAgent: 'partyName',
+  namedAgent: 'partyName',
+  Partner: 'partnerName',
+  partner: 'partnerName',
+  witness: 'companyWitness',
+  witness1: 'companyWitness',
+  witness2: 'agentWitness'
+};
+
+/** Resolve any placeholder key (including aliases) to its field value. */
+export const resolveCFField = (key, fields = {}) => {
+  const k = String(key ?? '').trim();
+  if (!k) return '';
+  if (fields[k] != null && String(fields[k]).trim() !== '') return String(fields[k]).trim();
+  const alias = CF_FIELD_ALIASES[k];
+  if (alias && fields[alias] != null && String(fields[alias]).trim() !== '') {
+    return String(fields[alias]).trim();
+  }
+  // Reverse lookup: check if any alias points to k
+  for (const [alt, canon] of Object.entries(CF_FIELD_ALIASES)) {
+    if (canon === k && fields[alt] != null && String(fields[alt]).trim() !== '') {
+      return String(fields[alt]).trim();
+    }
+  }
+  // Case-insensitive fallback
+  const lower = k.toLowerCase();
+  for (const [fk, fv] of Object.entries(fields)) {
+    if (String(fk).toLowerCase() === lower && String(fv ?? '').trim() !== '') {
+      return String(fv).trim();
+    }
+  }
+  return '';
+};
+
+/** Substitute {{placeholders}} in a template string. */
+export const applyCFText = (text = '', fields = {}) =>
+  String(text ?? '').replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_, key) => {
+    const v = resolveCFField(key, fields);
+    return v || `{{${String(key).trim()}}}`;
+  });
+
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -52,6 +106,13 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
 export const applyCFFieldDefaults = (fields = {}, company = null) => {
   const now = new Date();
   const out = { ...fields };
+
+  // Sync aliases bidirectionally so both canonical and alias names are populated
+  for (const [alias, canonical] of Object.entries(CF_FIELD_ALIASES)) {
+    if (out[alias] && !out[canonical]) out[canonical] = out[alias];
+    else if (out[canonical] && !out[alias]) out[alias] = out[canonical];
+  }
+
   const day = String(now.getDate());
   const month = MONTHS[now.getMonth()];
   const fullYear = String(now.getFullYear());
@@ -97,6 +158,11 @@ export const applyCFFieldDefaults = (fields = {}, company = null) => {
   }
   if (!String(out.margin || '').trim()) out.margin = out.commission;
   if (!String(out.godownAddress || '').trim()) out.godownAddress = out.partyAddress || 'As agreed';
+
+  // Resync aliases after defaults
+  for (const [alias, canonical] of Object.entries(CF_FIELD_ALIASES)) {
+    if (out[canonical] && !out[alias]) out[alias] = out[canonical];
+  }
 
   return out;
 };

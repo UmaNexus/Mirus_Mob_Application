@@ -117,6 +117,61 @@ def generate_app_icon():
     save_both(icon, "app_icon_512x512.png")
 
 # ==========================================
+# 1B. LAUNCHER & ADAPTIVE ICONS (1024x1024 PNG)
+# ==========================================
+def generate_launcher_icons():
+    print("Generating Launcher & Adaptive Icons (1024x1024)...")
+    import numpy as np
+    
+    mark_path = os.path.join(REPO_ROOT, 'mobile', 'assets', 'logo-mirus-mark.png')
+    mark = Image.open(mark_path).convert('RGBA')
+    bbox = mark.getbbox()
+    cropped = mark.crop(bbox)
+    
+    # Scale mark to comfortably fit within 66% safe zone diameter (~676px)
+    target_w = 540
+    aspect = cropped.size[1] / cropped.size[0]
+    target_h = int(target_w * aspect)
+    mark_resized = cropped.resize((target_w, target_h), Image.Resampling.LANCZOS)
+    
+    offset_x = (1024 - target_w) // 2
+    offset_y = (1024 - target_h) // 2
+    
+    # 1. Master Icon (iOS / general Expo icon: solid white background)
+    master = Image.new('RGBA', (1024, 1024), (255, 255, 255, 255))
+    master.paste(mark_resized, (offset_x, offset_y), mark_resized)
+    master_dest = os.path.join(REPO_ROOT, 'mobile', 'assets', 'icon.png')
+    master.convert('RGB').save(master_dest, optimize=True)
+    print(f"Saved: {master_dest}")
+    
+    # 2. Android Adaptive Icon Foreground (transparent background)
+    adaptive = Image.new('RGBA', (1024, 1024), (0, 0, 0, 0))
+    adaptive.paste(mark_resized, (offset_x, offset_y), mark_resized)
+    adaptive_dest = os.path.join(REPO_ROOT, 'mobile', 'assets', 'adaptive-icon.png')
+    adaptive.save(adaptive_dest, optimize=True)
+    print(f"Saved: {adaptive_dest}")
+    
+    # 3. Android 13+ Themed / Monochromatic Icon (transparent background)
+    arr = np.array(mark_resized)
+    r, g, b, a = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2], arr[:, :, 3]
+    is_orange = (r > 180) & (a > 20)
+    is_gray = (r <= 180) & (a > 20)
+    
+    mono_arr = np.zeros_like(arr)
+    mono_arr[:, :, 0] = 255
+    mono_arr[:, :, 1] = 255
+    mono_arr[:, :, 2] = 255
+    mono_arr[is_orange, 3] = a[is_orange]
+    mono_arr[is_gray, 3] = (a[is_gray].astype(float) * 0.65).astype(np.uint8)
+    
+    mono_img = Image.fromarray(mono_arr, 'RGBA')
+    adaptive_mono = Image.new('RGBA', (1024, 1024), (0, 0, 0, 0))
+    adaptive_mono.paste(mono_img, (offset_x, offset_y), mono_img)
+    mono_dest = os.path.join(REPO_ROOT, 'mobile', 'assets', 'adaptive-icon-monochrome.png')
+    adaptive_mono.save(mono_dest, optimize=True)
+    print(f"Saved: {mono_dest}")
+
+# ==========================================
 # 2. FEATURE GRAPHIC (1024x500 PNG)
 # ==========================================
 def generate_feature_graphic():
@@ -658,6 +713,9 @@ def main():
     
     # 1. App Icon (512x512)
     generate_app_icon()
+    
+    # 1B. Launcher & Adaptive Icons (1024x1024)
+    generate_launcher_icons()
     
     # 2. Feature Graphic (1024x500)
     generate_feature_graphic()
