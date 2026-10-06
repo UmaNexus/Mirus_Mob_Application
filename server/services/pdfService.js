@@ -9,7 +9,27 @@ import ApiError from '../utils/ApiError.js';
 import { monthlyCtcFromAnnual } from '../utils/salaryEngine.js';
 import { getOfferTravelAllowanceLine } from '../utils/offerTravelAllowance.js';
 import { downscaleForPdfEmbed } from './brandingOptimize.js';
+import { execFileSync } from 'node:child_process';
 import { resolveCFField, applyCFFieldDefaults } from '../config/cfFields.js';
+
+let cachedPythonBin = null;
+const resolvePythonBin = () => {
+  if (cachedPythonBin) return cachedPythonBin;
+  const candidates = process.platform === 'win32'
+    ? ['python', 'python3', 'py']
+    : ['python3', 'python', '/usr/bin/python3', '/usr/local/bin/python3'];
+
+  for (const bin of candidates) {
+    try {
+      execFileSync(bin, ['--version'], { stdio: 'pipe', timeout: 3000 });
+      cachedPythonBin = bin;
+      return bin;
+    } catch {
+      // try next
+    }
+  }
+  return process.platform === 'win32' ? 'python' : 'python3';
+};
 
 const ROOT = process.cwd();
 export const PAYSLIP_DIR = path.resolve(ROOT, 'uploads', 'payslips');
@@ -2187,27 +2207,28 @@ export const fillTemplateCFAgreementPdf = async ({
 
   // 1. Try PyMuPDF engine for authentic 10-page template with zero placeholder residue
   const dest = path.join(CF_ISSUED_DIR, `cf-${crypto.randomUUID()}.pdf`);
-  try {
-    const { execFileSync } = await import('node:child_process');
-    const pyScript = path.resolve(ROOT, 'scripts', 'fillCFTemplate.py');
-    if (fs.existsSync(pyScript)) {
-      const tmpJson = path.join(CF_ISSUED_DIR, `tmp-${crypto.randomUUID()}.json`);
-      await fsp.writeFile(tmpJson, JSON.stringify(mergedFields));
-      try {
-        execFileSync('python', [pyScript, templateAbsPath, tmpJson, dest], {
-          timeout: 10000,
-          stdio: ['ignore', 'pipe', 'pipe']
-        });
-        if (fs.existsSync(dest) && fs.statSync(dest).size > 1000) {
-          await fsp.unlink(tmpJson).catch(() => {});
-          return relPath(dest);
-        }
-      } finally {
+  const pythonBin = resolvePythonBin();
+  const pyScript = path.resolve(ROOT, 'scripts', 'fillCFTemplate.py');
+
+  if (fs.existsSync(pyScript)) {
+    const tmpJson = path.join(CF_ISSUED_DIR, `tmp-${crypto.randomUUID()}.json`);
+    await fsp.writeFile(tmpJson, JSON.stringify(mergedFields));
+    try {
+      execFileSync(pythonBin, [pyScript, templateAbsPath, tmpJson, dest], {
+        timeout: 15000,
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+      if (fs.existsSync(dest) && fs.statSync(dest).size > 1000) {
         await fsp.unlink(tmpJson).catch(() => {});
+        return relPath(dest);
       }
+    } catch (pyErr) {
+      console.error(`[C&F Template Engine] PyMuPDF failed via '${pythonBin}':`, pyErr?.stderr ? String(pyErr.stderr) : pyErr?.message || pyErr);
+    } finally {
+      await fsp.unlink(tmpJson).catch(() => {});
     }
-  } catch (pyErr) {
-    console.warn('PyMuPDF C&F template engine fallback to pdf-lib:', pyErr?.message || pyErr);
+  } else {
+    console.warn(`[C&F Template Engine] Script not found: ${pyScript}`);
   }
 
   let bytes;

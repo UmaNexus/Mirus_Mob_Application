@@ -4,6 +4,12 @@ import os
 import fitz  # PyMuPDF
 
 def get_font_paths():
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    bundled_reg = os.path.join(base_dir, 'assets', 'fonts', 'trebuc.ttf')
+    bundled_bd = os.path.join(base_dir, 'assets', 'fonts', 'trebucbd.ttf')
+    if os.path.exists(bundled_reg):
+        return bundled_reg, (bundled_bd if os.path.exists(bundled_bd) else bundled_reg)
+
     win_regular = 'C:/Windows/Fonts/trebuc.ttf'
     win_bold = 'C:/Windows/Fonts/trebucbd.ttf'
     if os.path.exists(win_regular):
