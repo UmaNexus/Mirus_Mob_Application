@@ -44,6 +44,13 @@ const ROLE_LINES = [
       || /zonal\s*sales\s*manager/.test(s)
       || /zonal\s*business\s*manager/.test(s),
     text: 'Headquarters - Rs 600, Outstation - Rs 800, Stay - Rs 2000 + GST, Per Km - Rs 3.50'
+  },
+  {
+    key: 'GM_PRODUCT',
+    test: (s) => /\bgm\b/.test(s)
+      || /general\s*manager/.test(s)
+      || /group\s*product\s*manager/.test(s),
+    text: 'Headquarters - Rs 600, Outstation - Rs 800, Stay - Rs 2000 + GST, Per Km - Rs 3.50'
   }
 ];
 
